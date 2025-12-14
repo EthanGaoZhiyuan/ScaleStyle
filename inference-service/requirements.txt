@@ -1,0 +1,19 @@
+# ==========================================
+# gRPC & Protocol Buffers
+# ==========================================
+grpcio==1.76.0
+grpcio-tools==1.76.0
+protobuf==6.33.2
+
+# ==========================================
+# Data Processing (Optimized)
+# ==========================================
+# We use PyArrow for reading Parquet files (No Spark/Java needed)
+pyarrow==22.0.0
+numpy==2.2.6
+
+# ==========================================
+# Utilities
+# ==========================================
+# typing_extensions is often needed for backward compatibility
+typing_extensions==4.15.0

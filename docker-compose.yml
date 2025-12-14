@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # 1. Java Gateway Service (Spring Boot)
+  # ==========================================
+  gateway-service:
+    container_name: scalestyle-gateway
+    build: 
+      context: ./gateway-service
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      # Service Discovery: Use the service name "inference-service" directly within the Docker network
+      - GRPC_SERVER_HOST=inference-service
+      - GRPC_SERVER_PORT=50051
+      - METADATA_PATH=/app/data/product_metadata.json
+    volumes:
+      - ./data-pipeline/data/processed:/app/data
+    depends_on:
+      inference-service:
+        condition: service_started
+    networks:
+      - scalestyle-net
+
+  # ==========================================
+  # 2. Python Inference Service (gRPC + Ray Logic)
+  # ==========================================
+  inference-service:
+    container_name: scalestyle-inference
+    build: 
+      context: ./inference-service
+      dockerfile: Dockerfile
+    ports:
+      - "50051:50051"
+    environment:
+      - PORT=50051
+      # Internal path for reading data inside the container
+      - DATA_PATH=/app/data/top_items_parquet
+      # (Optional) Environment variables reserved for future MinIO connection
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+      - AWS_ENDPOINT_URL=http://minio:9000
+    volumes:
+      # 🚀 Key Point: Mount the host-generated Parquet data into the container
+      # Format: Host Path : Container Path
+      - ./data-pipeline/data/processed/top_items_parquet:/app/data/top_items_parquet
+    networks:
+      - scalestyle-net
+
+  # ==========================================
+  # 3. MinIO (S3 Compatible Storage - Object Store)
+  # ==========================================
+  minio:
+    container_name: scalestyle-minio
+    image: minio/minio:RELEASE.2024-01-13T07-53-03Z
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000" # API Port
+      - "9001:9001" # Console UI Port
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    networks:
+      - scalestyle-net
+
+# Define volumes (Persist MinIO data)
+volumes:
+  minio_data:
+
+# Define networks (Enable communication between containers)
+networks:
+  scalestyle-net:
+    driver: bridge

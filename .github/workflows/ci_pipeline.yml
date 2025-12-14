@@ -1,0 +1,50 @@
+name: CI Pipeline (Lint & Build)
+
+on:
+  push:
+    branches: [ "main", "feat/**" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  # Job 1: Check Python Code Quality (Linting)
+  python_lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: Install Linting Dependencies
+        run: pip install black ruff
+      
+      - name: Run Black Formatter Check
+        run: |
+          black .
+          black --check .
+        
+      - name: Run Ruff Linter
+        run: |
+          ruff check --fix .
+          ruff check .
+
+  # Job 2: Check Java/Gradle Build
+  java_build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21 (Required for Virtual Threads)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+      
+      - name: Grant Execute Permission for Gradle Wrapper
+        run: chmod +x gateway-service/gradlew
+        
+      - name: Build with Gradle (Check Compilation)
+        # Use the Gradle Wrapper inside the gateway-service directory
+        run: ./gateway-service/gradlew build -p gateway-service/

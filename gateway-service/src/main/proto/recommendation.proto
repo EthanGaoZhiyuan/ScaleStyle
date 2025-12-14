@@ -1,0 +1,31 @@
+syntax = "proto3";  // Specify the syntax version
+
+// === Java package option ===
+option java_package = "com.example.gateway.grpc";
+option java_multiple_files = true;
+option java_outer_classname = "RecommendationProto";
+
+// Define the package name for the proto file
+package recommendation;
+
+// === 1. Define Service API ===
+service RecommendationService {
+  // RPC method to get recommendations based on user ID
+  rpc GetRecommendations (UserRequest) returns (RecommendationResponse);
+}
+
+message UserRequest {
+  string user_id = 1;  // Unique identifier for the user
+  int32 k = 2;        // Number of recommendations to retrieve
+  string scene = 3;   // Context or scenario for recommendations
+}
+
+message RecommendationResponse {
+  string user_id = 1;                     // User ID for whom recommendations are made
+  repeated ItemPrediction items = 2;      // List of recommended items
+}
+
+message ItemPrediction {
+  string item_id = 1;      // Unique identifier for the recommended item
+  double score = 2;         // Score indicating the strength of the recommendation
+}
