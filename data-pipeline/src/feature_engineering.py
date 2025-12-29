@@ -11,12 +11,18 @@
 #   - Used PySpark MLlib for robust numerical scaling (StandardScaler).
 #   - Added explicit schema handling for data quality safety.
 # ==============================================================================
+# Production Logic Updated: Phase 2 (Time Decay & Negative Sampling)
+# ==============================================================================
 
 from pyspark.ml.feature import StandardScaler, VectorAssembler
 from pyspark.ml.functions import vector_to_array
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.functions import col, isnull, lit, when
+
+import random
+from pyspark.sql.types import ArrayType, IntegerType, FloatType
+from pyspark.sql.window import Window
 
 
 def get_spark_session(app_name: str = "ScaleStyle_Static_Feature_ETL") -> SparkSession:
@@ -158,42 +164,93 @@ def preprocess_transactions(transactions_df: DataFrame) -> DataFrame:
     # 1. Data Conversion
     df = transactions_df.withColumn("t_dat", F.to_date(F.col("t_dat")))
 
-    # 2. Handle Duplicates & Create 'article_purchase_count'
-    group_cols = ["t_dat", "customer_id", "article_id", "price", "sales_channel_id"]
-    df = df.groupBy(group_cols).count().withColumnRenamed("count", "article_purchase_count")
+    # 2. Time Decay Weighting
+    max_date = df.agg(F.max("t_dat")).collect()[0][0]
 
-    # 3. Scaling Numerical Features
-    features_to_scale = ["price", "article_purchase_count"]
-
-    for feature_name in features_to_scale:
-        # a. Vector Assembler: Convert scalar to vector
-        vec_col_name = f"{feature_name}_vec"
-        assembler = VectorAssembler(inputCols=[feature_name], outputCol=vec_col_name)
-        df = assembler.transform(df)
-
-        # b. StandardScaler: Fit and transform
-        scaled_vec_col_name = f"{feature_name}_scaled_vec"
-        scaler = StandardScaler(
-            inputCol=vec_col_name, outputCol=scaled_vec_col_name, withMean=True, withStd=True
-        )
-        scaler_model = scaler.fit(df)
-        df = scaler_model.transform(df)
-
-        # c. Extract scaled scalar from vector
-        final_col_name = f"{feature_name}_scaled"
-        df = df.withColumn(final_col_name, vector_to_array(F.col(scaled_vec_col_name)).getItem(0))
-
-        # Cleanup temp columns
-        df = df.drop(vec_col_name, scaled_vec_col_name)
-
-    return df.select(
-        "t_dat",
-        "customer_id",
-        "article_id",
-        "price_scaled",
-        "article_purchase_count_scaled",
-        "sales_channel_id",
+    # 3. Days Difference Calculation
+    df = df.withColumn("days_diff", F.datediff(F.lit(max_date), F.col("t_dat")))
+    
+    # 4. Decay Weight Calculation
+    decay_rate = 0.005
+    df = df.withColumn("decay_weight", 1.0 / (1.0 + decay_rate * F.col("days_diff")))
+    
+    # 5. Aggregation
+    # Group by customer_id and article_id to aggregate features
+    df_grouped = df.groupBy("customer_id", "article_id").agg(
+        F.sum("decay_weight").alias("total_decay_weight"),
+        F.count("article_id").alias("article_purchase_count"),
+        F.max("t_dat").alias("last_purchase_date"),
+        F.mean("price").alias("price"),
+        F.last("sales_channel_id").alias("sales_channel_id"),
     )
+    
+    return df_grouped
+
+def generate_negative_samples(df_interactions: DataFrame, ratio: int = 4) -> DataFrame:
+    """ Phase 2 Upgrade: Popularity-based negative sampling
+
+    Generates negative samples for implicit feedback data using popularity-based sampling.
+    
+    Why:
+    Recommendation models need to know what users do not like.
+    Since we only have purcahse data (implicit feedback), we need to generate negative samples.
+    We assume that popular items not purchased by a user are likely negative samples.
+    """
+    # 1. Positive Interactions
+    positives = df_interactions.withColumn("label", F.lit(1))
+    
+    # 2. Popular Items Calculation
+    top_items = df_interactions.groupBy("article_id").count().orderBy(F.desc("count")).limit(1000)
+    
+    popular_items = [row['article_id'] for row in top_items.collect()]
+    
+    # 3. Negative Sampling UDF
+    def get_negative_samples(purchased_items):
+        if not purchased_items:
+            return []
+        
+        negatives = set()
+        num_negatives_needed = ratio * len(purchased_items)
+        
+        attemps = 0
+        max_attempts = num_negatives_needed * 3
+        
+        while len(negatives) < num_negatives_needed and attemps < max_attempts:
+            candidate = random.choice(popular_items)
+            if candidate not in purchased_items:
+                negatives.add(candidate)
+            attemps += 1
+            
+        return list(negatives)
+    
+    get_negatives_udf = F.udf(get_negative_samples, ArrayType(IntegerType()))
+    
+    # 4. Generate Negative Samples
+    user_history = df_interactions.groupBy("customer_id").agg(
+        F.collect_set("article_id").alias("purchased_items")
+    )
+    
+    # 5. Create Negative Samples DataFrame
+    user_with_negatives = user_history.withColumn(
+        "negative_samples", get_negatives_udf(F.col("purchased_items"))
+    )
+    
+    # 6. Explode Negative Samples
+    negatives = user_with_negatives.select(
+        F.col("customer_id"),
+        F.explode(F.col("negative_samples")).alias("article_id")
+    ).withColumn("label", F.lit(0)) \
+    .withColumn("total_decay_weight", F.lit(0.0)) \
+    .withColumn("article_purchase_count", F.lit(0)) \
+    .withColumn("price", F.lit(0.0)) \
+    .withColumn("sales_channel_id", F.lit(2))
+    
+    # 7. Combine Positives and Negatives
+    common_cols = ["customer_id", "article_id", "label", "total_decay_weight", "price", "sales_channel_id"]
+    
+    final_df = positives.select(*common_cols).unionByName(negatives.select(*common_cols))
+    
+    return final_df
 
 
 def merge_datasets(
@@ -218,4 +275,5 @@ def merge_datasets(
 
 
 if __name__ == "__main__":
-    print("This module is intended to be imported by the ETL Runner Notebook.")
+    print("Feature Engineering Module Loaded Successfully.")
+    print("Phase 2 Upgrades: Time Decay Weighting and Popularity-based Negative Sampling included.")

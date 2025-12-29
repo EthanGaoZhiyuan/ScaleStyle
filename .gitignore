@@ -1,0 +1,72 @@
+# Java/Gradle
+*.class
+*.jar
+*.war
+*.ear
+.gradle/
+build/
+bin/
+!gradle/wrapper/gradle-wrapper.jar
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+*.egg-info/
+dist/
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
+logs/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Data files
+data-pipeline/data/
+*.csv
+*.parquet
+*.json
+!**/package.json
+!**/package-lock.json
+
+# Temporary files
+tmp/
+temp/
+*.tmp

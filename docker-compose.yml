@@ -16,6 +16,8 @@ services:
       - GRPC_SERVER_HOST=inference-service
       - GRPC_SERVER_PORT=50051
       - METADATA_PATH=/app/data/product_metadata.json
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     volumes:
       - ./data-pipeline/data/processed:/app/data
     depends_on:
@@ -42,6 +44,10 @@ services:
       - AWS_ACCESS_KEY_ID=minioadmin
       - AWS_SECRET_ACCESS_KEY=minioadmin
       - AWS_ENDPOINT_URL=http://minio:9000
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     volumes:
       # 🚀 Key Point: Mount the host-generated Parquet data into the container
       # Format: Host Path : Container Path
@@ -66,10 +72,75 @@ services:
       - minio_data:/data
     networks:
       - scalestyle-net
+  # ==========================================
+  # 4. Etcd (Required by Milvus)
+  # ==========================================
+  etcd:
+    container_name: scalestyle-etcd
+    image: quay.io/coreos/etcd:v3.5.5
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=8589934592
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd-data
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    networks:
+      - scalestyle-net
+  # ==========================================
+  # 5. Milvus (Vector Database)
+  # ==========================================
+  milvus:
+    container_name: scalestyle-milvus
+    image: milvusdb/milvus:v2.3.3
+    command: milvus run standalone
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: minioadmin
+      MINIO_SECRET_ACCESS_KEY: minioadmin
+    volumes:
+      - milvus_data:/var/lib/milvus
+    ports:
+      - "19530:19530" # gRPC Port
+      - "9091:9091"   # HTTP Port
+    depends_on:
+      - etcd
+      - minio
+    networks:
+      - scalestyle-net
+  # ==========================================
+  # 6. Attu (Milvus GUI)
+  # ==========================================
+  attu:
+    container_name: scalestyle-attu
+    image: zilliz/attu:latest 
+    environment:
+      MILVUS_URL: milvus:19530
+    ports:
+      - "8088:3000"
+    depends_on:
+      - milvus
+    networks:
+      - scalestyle-net
+  # ==========================================
+  # 7. Redis (In-Memory Data Store)
+  # ==========================================
+  redis:
+    container_name: scalestyle-redis
+    image: redis:7.0-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - scalestyle-net
 
 # Define volumes (Persist MinIO data)
 volumes:
   minio_data:
+  etcd_data:
+  milvus_data:
+  redis_data:
 
 # Define networks (Enable communication between containers)
 networks:
