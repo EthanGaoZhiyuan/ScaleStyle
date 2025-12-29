@@ -14,15 +14,12 @@
 # Production Logic Updated: Phase 2 (Time Decay & Negative Sampling)
 # ==============================================================================
 
-from pyspark.ml.feature import StandardScaler, VectorAssembler
-from pyspark.ml.functions import vector_to_array
+import random
+
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.functions import col, isnull, lit, when
-
-import random
-from pyspark.sql.types import ArrayType, IntegerType, FloatType
-from pyspark.sql.window import Window
+from pyspark.sql.types import ArrayType, IntegerType
 
 
 def get_spark_session(app_name: str = "ScaleStyle_Static_Feature_ETL") -> SparkSession:
