@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger("scalestyle.retrieval")
 
+
 @serve.deployment
 class RetrievalDeployment:
     def __init__(self):
@@ -57,7 +58,9 @@ class RetrievalDeployment:
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         if not self.ready:
-            raise RuntimeError("Retrieval not ready (Milvus collection missing or not loaded)")
+            raise RuntimeError(
+                "Retrieval not ready (Milvus collection missing or not loaded)"
+            )
 
         t0 = time.time()
         search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}}
@@ -98,5 +101,10 @@ class RetrievalDeployment:
             article_id = ent.get("article_id", h.get("id"))
             out.append({"article_id": article_id, "score": h.get("distance")})
 
-        logger.info("search candidate_k=%d expr=%s took=%.2fms", candidate_k, expr, (time.time() - t0) * 1000)
+        logger.info(
+            "search candidate_k=%d expr=%s took=%.2fms",
+            candidate_k,
+            expr,
+            (time.time() - t0) * 1000,
+        )
         return out[:candidate_k]

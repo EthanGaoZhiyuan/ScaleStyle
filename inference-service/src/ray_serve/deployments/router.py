@@ -1,11 +1,11 @@
 from ray import serve
 import re
 
+
 @serve.deployment
 class RouterDeployment:
     def __init__(self):
         self.colours = {"red": "Red", "blue": "Blue", "black": "Black"}
-
 
         self.price_patterns = [
             re.compile(r"(?:under|below|max)\s*\$?\s*(\d+(?:\.\d+)?)", re.I),

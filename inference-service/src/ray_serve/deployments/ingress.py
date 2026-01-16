@@ -20,22 +20,24 @@ from src.ray_serve.deployments.popularity import PopularityDeployment
 logger = logging.getLogger("scalestyle.ingress")
 app = FastAPI()
 
+
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
     k: int = Field(10, ge=1, le=50)
     debug: bool = False
     user_id: Optional[str] = None
-    
+
+
 def _redis_client() -> redis.Redis:
     host = os.getenv("REDIS_HOST", "localhost")
     port = int(os.getenv("REDIS_PORT", "6379"))
     return redis.Redis(host=host, port=port, decode_responses=True)
 
+
 def _enrich_and_filter(r, candidates, filters, k):
     colour = filters.get("colour_group_name")
     price_lt = filters.get("price_lt")
 
-    
     ids = []
     for c in candidates:
         aid = c.get("article_id")
@@ -68,21 +70,24 @@ def _enrich_and_filter(r, candidates, filters, k):
 
     return results
 
+
 @serve.deployment
 @serve.ingress(app)
 class IngressDeployment:
-    def __init__(self, 
-                 router_handle: DeploymentHandle, 
-                 embedding_handle: DeploymentHandle, 
-                 retrieval_handle: DeploymentHandle,
-                 popularity_handle: DeploymentHandle):
+    def __init__(
+        self,
+        router_handle: DeploymentHandle,
+        embedding_handle: DeploymentHandle,
+        retrieval_handle: DeploymentHandle,
+        popularity_handle: DeploymentHandle,
+    ):
         self.router_handle = router_handle
         self.embedding_handle = embedding_handle
         self.retrieval_handle = retrieval_handle
         self.popularity_handle = popularity_handle
-        
+
         self.redis = _redis_client()
-        
+
     @app.get("/healthz")
     async def healthz(self):
         return {"ok": True}
@@ -142,7 +147,12 @@ class IngressDeployment:
         if intent == "BROWSE":
             results = await self.popularity_handle.topk.remote(req.k)
             total_ms = (time.time() - t0) * 1000
-            resp = {"query": req.query, "route": route, "results": results, "request_id": request_id}
+            resp = {
+                "query": req.query,
+                "route": route,
+                "results": results,
+                "request_id": request_id,
+            }
             if req.debug:
                 resp["latency_ms"] = {"total": total_ms}
             logger.info(
@@ -160,10 +170,19 @@ class IngressDeployment:
             vector = await self.embedding_handle.embed.remote(req.query, is_query=True)
             embed_ms = (time.time() - t_embed0) * 1000
         except Exception as e:
-            logger.exception("request_id=%s embed_failed err=%s -> fallback popularity", request_id, e)
+            logger.exception(
+                "request_id=%s embed_failed err=%s -> fallback popularity",
+                request_id,
+                e,
+            )
             results = await self.popularity_handle.topk.remote(req.k)
             total_ms = (time.time() - t0) * 1000
-            resp = {"query": req.query, "route": route, "results": results, "request_id": request_id}
+            resp = {
+                "query": req.query,
+                "route": route,
+                "results": results,
+                "request_id": request_id,
+            }
             if req.debug:
                 resp["latency_ms"] = {"embed": embed_ms, "total": total_ms}
             return resp
@@ -181,12 +200,25 @@ class IngressDeployment:
             )
             ret_ms = (time.time() - t_ret0) * 1000
         except Exception as e:
-            logger.exception("request_id=%s retrieval_failed err=%s -> fallback popularity", request_id, e)
+            logger.exception(
+                "request_id=%s retrieval_failed err=%s -> fallback popularity",
+                request_id,
+                e,
+            )
             results = await self.popularity_handle.topk.remote(req.k)
             total_ms = (time.time() - t0) * 1000
-            resp = {"query": req.query, "route": route, "results": results, "request_id": request_id}
+            resp = {
+                "query": req.query,
+                "route": route,
+                "results": results,
+                "request_id": request_id,
+            }
             if req.debug:
-                resp["latency_ms"] = {"embed": embed_ms, "retrieve": ret_ms, "total": total_ms}
+                resp["latency_ms"] = {
+                    "embed": embed_ms,
+                    "retrieve": ret_ms,
+                    "total": total_ms,
+                }
             return resp
 
         # 5) filter + enrich (redis)
@@ -196,13 +228,26 @@ class IngressDeployment:
             if not results:
                 results = await self.popularity_handle.topk.remote(req.k)
         except Exception as e:
-            logger.exception("request_id=%s enrich_filter_failed err=%s -> fallback popularity", request_id, e)
+            logger.exception(
+                "request_id=%s enrich_filter_failed err=%s -> fallback popularity",
+                request_id,
+                e,
+            )
             results = await self.popularity_handle.topk.remote(req.k)
 
         total_ms = (time.time() - t0) * 1000
-        resp = {"query": req.query, "route": route, "results": results, "request_id": request_id}
+        resp = {
+            "query": req.query,
+            "route": route,
+            "results": results,
+            "request_id": request_id,
+        }
         if req.debug:
-            resp["latency_ms"] = {"embed": embed_ms, "retrieve": ret_ms, "total": total_ms}
+            resp["latency_ms"] = {
+                "embed": embed_ms,
+                "retrieve": ret_ms,
+                "total": total_ms,
+            }
 
         logger.info(
             "request_id=%s intent=SEARCH k=%d embed_ms=%.2f ret_ms=%.2f total_ms=%.2f filters=%s",
@@ -214,10 +259,12 @@ class IngressDeployment:
             json.dumps(filters, ensure_ascii=False),
         )
         return resp
-    
-    
+
+
 router_node = RouterDeployment.bind()
 embedding_node = EmbeddingDeployment.bind()
 retrieval_node = RetrievalDeployment.bind()
 popularity_node = PopularityDeployment.bind()
-ingress_app = IngressDeployment.bind(router_node, embedding_node, retrieval_node, popularity_node)
+ingress_app = IngressDeployment.bind(
+    router_node, embedding_node, retrieval_node, popularity_node
+)

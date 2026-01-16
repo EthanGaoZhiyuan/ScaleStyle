@@ -21,8 +21,10 @@ EMBEDDING_COL = os.getenv("EMBEDDING_COL", "embedding")
 POPULARITY_KEY = os.getenv("POPULARITY_KEY", "global:popular")
 POPULARITY_TOPN = int(os.getenv("POPULARITY_TOPN", "200"))
 
+
 def redis_client() -> redis.Redis:
     return redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+
 
 def main():
     assert os.path.exists(DATA_PATH), f"DATA_PATH not found: {DATA_PATH}"
@@ -68,7 +70,9 @@ def main():
     pipe.execute()
 
     # ---------- 2) Popularity list ----------
-    print(f"[loader] writing popularity list key={POPULARITY_KEY} size={len(popularity_ids)}")
+    print(
+        f"[loader] writing popularity list key={POPULARITY_KEY} size={len(popularity_ids)}"
+    )
     r.delete(POPULARITY_KEY)
     if popularity_ids:
         r.rpush(POPULARITY_KEY, *popularity_ids)

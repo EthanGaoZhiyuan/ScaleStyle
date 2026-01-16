@@ -4,7 +4,9 @@ import boto3
 
 
 class S3Client:
-    def __init__(self, aws_access_key_id=None, aws_secret_access_key=None, region_name=None):
+    def __init__(
+        self, aws_access_key_id=None, aws_secret_access_key=None, region_name=None
+    ):
         self.s3 = boto3.client(
             "s3",
             endpoint_url="http://127.0.0.1:9000",
@@ -50,8 +52,6 @@ if __name__ == "__main__":
     s3_client = S3Client()
     s3_client.upload_folder("./data/output/", "output/")
 
-    local_data_path = (
-        "/Users/Ethan/Develop/ScaleStyle/data-pipeline/data/processed/train_data_parquet"
-    )
+    local_data_path = "/Users/Ethan/Develop/ScaleStyle/data-pipeline/data/processed/train_data_parquet"
     # Execute upload
     s3_client.upload_folder(local_data_path, "processed/train_data_parquet")

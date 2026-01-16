@@ -1,7 +1,14 @@
 import os
 import math
 import pandas as pd
-from pymilvus import connections, FieldSchema, CollectionSchema, DataType, Collection, utility
+from pymilvus import (
+    connections,
+    FieldSchema,
+    CollectionSchema,
+    DataType,
+    Collection,
+    utility,
+)
 
 DATA_PATH = os.getenv("DATA_PATH", "data-pipeline/data/articles.parquet")
 EMBEDDING_COL = os.getenv("EMBEDDING_COL", "embedding")
@@ -11,6 +18,7 @@ MILVUS_PORT = os.getenv("MILVUS_PORT", "19530")
 COLLECTION = os.getenv("MILVUS_COLLECTION", "scale_style_bge_v1")
 
 BATCH_SIZE = int(os.getenv("MILVUS_INSERT_BATCH", "2000"))
+
 
 def main():
     assert os.path.exists(DATA_PATH), f"DATA_PATH not found: {DATA_PATH}"
@@ -29,15 +37,25 @@ def main():
         col = Collection(COLLECTION)
     else:
         fields = [
-            FieldSchema(name="article_id", dtype=DataType.INT64, is_primary=True, auto_id=False),
+            FieldSchema(
+                name="article_id", dtype=DataType.INT64, is_primary=True, auto_id=False
+            ),
             FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dim),
-            FieldSchema(name="colour_group_name", dtype=DataType.VARCHAR, max_length=64),
+            FieldSchema(
+                name="colour_group_name", dtype=DataType.VARCHAR, max_length=64
+            ),
             FieldSchema(name="price", dtype=DataType.FLOAT),
         ]
-        schema = CollectionSchema(fields, description="ScaleStyle embeddings + scalar fields")
+        schema = CollectionSchema(
+            fields, description="ScaleStyle embeddings + scalar fields"
+        )
         col = Collection(COLLECTION, schema=schema)
 
-        index_params = {"metric_type": "COSINE", "index_type": "IVF_FLAT", "params": {"nlist": 2048}}
+        index_params = {
+            "metric_type": "COSINE",
+            "index_type": "IVF_FLAT",
+            "params": {"nlist": 2048},
+        }
         col.create_index(field_name="embedding", index_params=index_params)
 
     # insert
@@ -47,8 +65,18 @@ def main():
         chunk = df.iloc[i * BATCH_SIZE : (i + 1) * BATCH_SIZE]
         ids = chunk["article_id"].astype("int64").tolist()
         vecs = chunk[EMBEDDING_COL].tolist()
-        colours = chunk.get("colour_group_name", pd.Series([""] * len(chunk))).fillna("").astype(str).tolist()
-        prices = chunk.get("price", pd.Series([0.0] * len(chunk))).fillna(0.0).astype(float).tolist()
+        colours = (
+            chunk.get("colour_group_name", pd.Series([""] * len(chunk)))
+            .fillna("")
+            .astype(str)
+            .tolist()
+        )
+        prices = (
+            chunk.get("price", pd.Series([0.0] * len(chunk)))
+            .fillna(0.0)
+            .astype(float)
+            .tolist()
+        )
 
         col.insert([ids, vecs, colours, prices])
         print(f"[milvus_init] inserted batch {i+1}/{rounds} size={len(ids)}")
@@ -56,6 +84,7 @@ def main():
     col.flush()
     col.load()
     print(f"[milvus_init] done. collection={COLLECTION} rows={n} dim={dim}")
+
 
 if __name__ == "__main__":
     main()

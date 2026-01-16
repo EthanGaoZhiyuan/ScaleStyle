@@ -1,6 +1,7 @@
 import os
 import redis
 
+
 class RedisClient:
     _instance = None
     _client = None

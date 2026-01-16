@@ -9,6 +9,7 @@ from ray import serve
 
 logger = logging.getLogger("scalestyle.embedding")
 
+
 def _env_int(name: str, default: int) -> int:
     v = os.getenv(name)
     if v is None:
@@ -18,6 +19,7 @@ def _env_int(name: str, default: int) -> int:
     except Exception:
         return default
 
+
 @serve.deployment(
     ray_actor_options={
         "num_cpus": _env_int("EMBEDDING_NUM_CPUS", 2),
@@ -26,7 +28,7 @@ def _env_int(name: str, default: int) -> int:
     autoscaling_config=None,
 )
 class EmbeddingDeployment:
-    def __init__(self):        
+    def __init__(self):
         self.ready = False
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -62,7 +64,7 @@ class EmbeddingDeployment:
             t_tok,
             t_model,
         )
-        
+
     def is_ready(self) -> bool:
         return bool(self.ready)
 
@@ -70,7 +72,7 @@ class EmbeddingDeployment:
         if is_query and self.query_prefix:
             return f"{self.query_prefix} {text}"
         return text
-        
+
     def embed(self, text: str, is_query: bool = True):
         """
         Serves a single query string and returns a list of floats (vector embedding).
