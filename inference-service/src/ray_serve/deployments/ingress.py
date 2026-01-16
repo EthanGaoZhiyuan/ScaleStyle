@@ -2,7 +2,7 @@ import os
 import time
 import uuid
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 import redis
 from fastapi import FastAPI, HTTPException
