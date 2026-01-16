@@ -1,12 +1,13 @@
-import os
 import math
+import os
+
 import pandas as pd
 from pymilvus import (
-    connections,
-    FieldSchema,
+    Collection,
     CollectionSchema,
     DataType,
-    Collection,
+    FieldSchema,
+    connections,
     utility,
 )
 
