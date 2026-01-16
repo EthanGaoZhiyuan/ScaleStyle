@@ -22,14 +22,11 @@ jobs:
         run: pip install black ruff
       
       - name: Run Black Formatter Check
-        run: |
-          black .
-          black --check .
+        run: black --check inference-service/src data-pipeline/src data-pipeline/tests
         
       - name: Run Ruff Linter
-        run: |
-          ruff check --fix .
-          ruff check .
+        run: ruff check inference-service/src data-pipeline/src data-pipeline/tests
+
 
   # Job 2: Check Java/Gradle Build
   java_build:

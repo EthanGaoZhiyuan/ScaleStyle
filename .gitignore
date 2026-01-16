@@ -1,72 +1,84 @@
-# Java/Gradle
+# =========================
+# OS / IDE
+# =========================
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# =========================
+# Java / Gradle
+# =========================
+.gradle/
+build/
+bin/
+out/
 *.class
 *.jar
 *.war
 *.ear
-.gradle/
-build/
-bin/
-!gradle/wrapper/gradle-wrapper.jar
 *.log
 
+# =========================
 # Python
+# =========================
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-env/
-venv/
-ENV/
-.venv
-*.egg-info/
-dist/
-*.egg
+*.pyd
+*.pyo
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
 htmlcov/
-.ipynb_checkpoints/
+dist/
+build/
+*.egg-info/
 
-# IDEs
-.idea/
-*.iml
-.vscode/
-*.swp
-*.swo
-*~
-.project
-.classpath
-.settings/
-
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-Thumbs.db
-
-# Docker
-docker-compose.override.yml
-
-# Logs
-*.log
-logs/
-
-# Environment variables
+# venv / env
+venv/
+.venv/
 .env
-.env.local
-.env.*.local
+.env.*
+.python-version
 
-# Data files
+# caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+ray_session*/
+*.pid
+cache/
+.cache/
+ray_results/
+tmp/
+
+# =========================
+# Node
+# =========================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# =========================
+# Data / Artifacts
+# =========================
 data-pipeline/data/
 *.csv
 *.parquet
 *.json
+*.pkl
+*.pt
+*.bin
+*.safetensors
+
+# ===== OS =====
+.DS_Store
+
+# Keep package lock files
 !**/package.json
 !**/package-lock.json
-
-# Temporary files
-tmp/
-temp/
-*.tmp

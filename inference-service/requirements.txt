@@ -1,19 +1,47 @@
 # ==========================================
-# gRPC & Protocol Buffers
+# Core Serving Engine (Ray)
+# ==========================================
+# Ray Serve is the heart of the new architecture
+ray[serve]>=2.9.0
+
+# ==========================================
+# AI & Deep Learning (The Brain)
+# ==========================================
+# Required for Qwen2 Embedding Model
+torch>=2.1.0          # PyTorch for tensor operations
+transformers>=4.37.0  # Hugging Face Transformers (Qwen2 needs new versions)
+accelerate>=0.26.0    # For efficient model loading/inference
+sentencepiece         # Tokenizer dependency
+
+# ==========================================
+# Vector Database & Storage
+# ==========================================
+pymilvus>=2.3.0       # Milvus Client SDK
+redis>=5.0.0          # Redis Client
+
+# ==========================================
+# gRPC & Protocol Buffers (Keep Existing)
 # ==========================================
 grpcio==1.76.0
 grpcio-tools==1.76.0
 protobuf==6.33.2
 
 # ==========================================
-# Data Processing (Optimized)
+# Data Processing
 # ==========================================
-# We use PyArrow for reading Parquet files (No Spark/Java needed)
 pyarrow==22.0.0
 numpy==2.2.6
+pandas>=2.0.0         # Often needed for data manipulation
+
+# ==========================================
+# Web & API (Ingress)
+# ==========================================
+fastapi>=0.100.0      # Ray Serve uses FastAPI for HTTP ingress
+uvicorn>=0.22.0       # ASGI Server
 
 # ==========================================
 # Utilities
 # ==========================================
-# typing_extensions is often needed for backward compatibility
 typing_extensions==4.15.0
+tqdm>=4.0.0           # Progress bars (always useful)
+python-dotenv         # For loading .env files (optional but recommended)

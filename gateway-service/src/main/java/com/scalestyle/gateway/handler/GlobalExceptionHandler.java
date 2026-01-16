@@ -2,6 +2,8 @@ package com.scalestyle.gateway.handler;
 
 import com.scalestyle.gateway.common.ResultCode;
 import com.scalestyle.gateway.exception.CommonApiResponse;
+import com.scalestyle.gateway.exception.InferenceServiceException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -21,6 +23,13 @@ public class GlobalExceptionHandler {
     public CommonApiResponse<String> handleException(Exception ex) {
         logger.error("Unhandled exception caught: ", ex);
         return CommonApiResponse.error(ResultCode.INTERNAL_SERVER_ERROR.getCode(), ResultCode.INTERNAL_SERVER_ERROR.getMessage() + ex.getMessage());
+    }
+
+    @ExceptionHandler(InferenceServiceException.class)
+    public CommonApiResponse<String> handleInferenceServiceException(InferenceServiceException e) {
+        logger.error("Inference service error: ", e);
+        return CommonApiResponse.error(ResultCode.SERVICE_UNAVAILABLE.getCode(),
+                ResultCode.SERVICE_UNAVAILABLE.getMessage() + ": " + e.getMessage());
     }
 
     @ExceptionHandler(NoResourceFoundException.class)

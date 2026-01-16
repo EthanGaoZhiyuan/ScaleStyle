@@ -1,15 +1,16 @@
 package com.scalestyle.gateway.service;
 
-import com.example.gateway.grpc.RecommendationResponse;
-import com.example.gateway.grpc.RecommendationServiceGrpc;
-import com.example.gateway.grpc.UserRequest;
+import com.scalestyle.gateway.dto.InferenceSearchRequest;
+import com.scalestyle.gateway.dto.InferenceSearchResponse;
+import com.scalestyle.gateway.dto.RecommendationDTO;
+import com.scalestyle.gateway.exception.InferenceServiceException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.scalestyle.gateway.dto.RecommendationDTO;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClient;
 
 import jakarta.annotation.PostConstruct;
 import java.io.File;
@@ -19,14 +20,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import net.devh.boot.grpc.client.inject.GrpcClient;
-
 @Slf4j
 @Service
 public class RecommendationService {
 
-    @GrpcClient("inference-service")
-    private RecommendationServiceGrpc.RecommendationServiceBlockingStub stub;
+    private final RestClient restClient;
+
+    public RecommendationService(RestClient inferenceRestClient) {
+        this.restClient = inferenceRestClient;
+    }
 
     @Getter
     private Map<String, RecommendationDTO> productCache;
@@ -36,68 +38,61 @@ public class RecommendationService {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    /**
-     * Initialize gRPC client connection when the application starts.
-     */
     @PostConstruct
     public void init() {
         log.info("Initializing Product Cache from: {}", metadataPath);
         try {
             File file = new File(metadataPath);
             if (file.exists()) {
-                // Read JSON as Map<String, RecommendationDTO>
                 productCache = objectMapper.readValue(file, new TypeReference<Map<String, RecommendationDTO>>() {});
-                log.info("✅ Successfully loaded {} products into memory.", productCache.size());
+                log.info("Successfully loaded {} products into memory.", productCache.size());
             } else {
-                log.warn("⚠️ Metadata file not found at {}. Using empty cache.", metadataPath);
+                log.warn("Metadata file not found at {}. Using empty cache.", metadataPath);
                 productCache = Collections.emptyMap();
             }
         } catch (IOException e) {
-            log.error("❌ Failed to load metadata JSON", e);
+            log.error("Failed to load metadata JSON", e);
             productCache = Collections.emptyMap();
         }
     }
 
-    /**
-     * Send a recommendation request to the Python Server (Ray Serve)
-     *
-     * @param userId
-     * @param k
-     * @return
-     */
-    public List<RecommendationDTO> getRecommendations(String userId, int k) {
-        // 1. Build the request object defined in the .proto file
-        UserRequest request = UserRequest.newBuilder().setUserId(userId).setK(k).build();
+    public List<RecommendationDTO> search(String query, String userId, int k, boolean debug) {
+        InferenceSearchRequest req = InferenceSearchRequest.builder()
+            .query(query)
+            .k(k)
+            .debug(debug)
+            .userId(userId)
+            .build();
 
+        final InferenceSearchResponse resp;
         try {
-            // 2. Execute the remote procedure call (RPC)
-            RecommendationResponse response = stub.getRecommendations(request);
-            return response.getItemsList().stream()
-                    .map(item -> {
-                        String rawId = item.getItemId();
-
-                        // Ensure the ID is zero-padded to 10 characters
-                        String lookupId = rawId.length() < 10 ? "0".repeat(10 - rawId.length()) + rawId : rawId;
-
-                        // Log a warning if the product is not found in the cache
-                        if (!productCache.containsKey(lookupId)) {
-                            log.warn("⚠️ Lookup failed for ID: '{}' (Raw: '{}')", lookupId, rawId);
-                        }
-
-                        // Return the product details from cache or a default placeholder
-                        return productCache.getOrDefault(lookupId, RecommendationDTO.builder()
-                                .itemId(rawId)
-                                .name("Unknown Product")
-                                .category("General")
-                                .description("Description unavailable")
-                                .price(0.00)
-                                .imgUrl("https://via.placeholder.com/150")
-                                .build());
-                    })
-                    .collect(Collectors.toList());
+            resp = restClient.post()
+                    .uri("/search")
+                    .body(req)
+                    .retrieve()
+                    .body(InferenceSearchResponse.class);
         } catch (Exception e) {
-            log.error("gRPC call failed for userId: {}", userId, e);
-            throw new RuntimeException("RPC call to the inference service failed", e);
+            throw new InferenceServiceException("Inference service call failed", e);
         }
+
+        if (resp == null || resp.getResults() == null) {
+            throw new InferenceServiceException("Inference service returned empty response");
+        }
+
+        return resp.getResults().stream()
+                .map(item -> {
+                    String rawId = String.valueOf(item.getArticle_id());
+                    String lookupId = rawId.length() < 10 ? "0".repeat(10 - rawId.length()) + rawId : rawId;
+
+                    return productCache.getOrDefault(lookupId, RecommendationDTO.builder()
+                            .itemId(rawId)
+                            .name("Unknown Product")
+                            .category("General")
+                            .description("Description unavailable")
+                            .price(0.00)
+                            .imgUrl("https://via.placeholder.com/150")
+                            .build());
+                })
+                .collect(Collectors.toList());
     }
 }
