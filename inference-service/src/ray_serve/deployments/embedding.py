@@ -13,11 +13,11 @@ logger = logging.getLogger("scalestyle.embedding")
 def _env_int(name: str, default: int) -> int:
     """
     Read an integer value from environment variable with fallback to default.
-    
+
     Args:
         name: Environment variable name to read.
         default: Default value if variable is not set or invalid.
-    
+
     Returns:
         int: The parsed integer value or default.
     """
@@ -40,16 +40,16 @@ def _env_int(name: str, default: int) -> int:
 class EmbeddingDeployment:
     """
     Ray Serve deployment for text embedding generation using transformer models.
-    
+
     This deployment loads a pre-trained transformer model (default: BGE-large-en-v1.5)
     and provides embedding generation for both queries and documents. Supports GPU
     acceleration when available and configurable resource allocation.
     """
-    
+
     def __init__(self):
         """
         Initialize the embedding deployment and load the transformer model.
-        
+
         Configures device (CPU/GPU), loads tokenizer and model, and prepares
         for embedding generation. Configuration is controlled via environment variables.
         """
@@ -96,7 +96,7 @@ class EmbeddingDeployment:
     def is_ready(self) -> bool:
         """
         Check if the embedding service is ready to handle requests.
-        
+
         Returns:
             bool: True if model is loaded and ready, False otherwise.
         """
@@ -105,14 +105,14 @@ class EmbeddingDeployment:
     def _prep_text(self, text: str, is_query: bool) -> str:
         """
         Prepare text by adding query prefix if applicable.
-        
+
         For asymmetric embedding models (like BGE), queries need a specific prefix
         to optimize retrieval performance, while documents don't need any prefix.
-        
+
         Args:
             text: Input text to prepare.
             is_query: Whether the text is a search query (True) or document (False).
-        
+
         Returns:
             str: Prepared text with prefix if applicable.
         """
@@ -123,14 +123,14 @@ class EmbeddingDeployment:
     def embed(self, text: str, is_query: bool = True):
         """
         Generate embedding vector(s) for input text(s).
-        
+
         Supports both single string and list of strings. Uses CLS token pooling
         and L2 normalization for embedding generation.
-        
+
         Args:
             text: Input text string or list of text strings to embed.
             is_query: Whether the text is a search query (adds prefix) or document.
-        
+
         Returns:
             List[float] or List[List[float]]: Single embedding vector for string input,
                 or list of embedding vectors for list input.

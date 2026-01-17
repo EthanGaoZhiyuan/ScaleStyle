@@ -10,7 +10,7 @@ DATA_PATH = os.getenv("DATA_PATH", "data-pipeline/data/articles.parquet")
 
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
 MILVUS_PORT = os.getenv("MILVUS_PORT", "19530")
-MILVUS_COLLECTION = os.getenv("MILVUS_COLLECTION", "scale_style_bge_v1")
+MILVUS_COLLECTION = os.getenv("MILVUS_COLLECTION", "scale_style_bge_v2")
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))

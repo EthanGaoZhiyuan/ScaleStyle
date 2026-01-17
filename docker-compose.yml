@@ -37,12 +37,25 @@ services:
     environment:
       - MILVUS_HOST=milvus
       - MILVUS_PORT=19530
-      - MILVUS_COLLECTION=scale_style_bge_v1
+      - MILVUS_COLLECTION=scale_style_bge_v2
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       # HF cache in container
       - HF_HOME=/cache/huggingface
       - TRANSFORMERS_CACHE=/cache/huggingface/hub
+      # ----- Embedding tuning -----
+      - EMBEDDING_MODEL=BAAI/bge-large-en-v1.5
+      - EMBEDDING_MAX_LEN=512
+      - EMBEDDING_NUM_GPUS=0
+
+      # ----- Popularity -----
+      - POPULARITY_KEY=global:popular
+
+      # ----- Reranker -----
+      - RERANK_ENABLED=1
+      - RERANK_MODEL=stub
+      - RERANK_BATCH_SIZE=32
+      - RERANK_MAX_DOCS=100
     volumes:
       - ./data-pipeline/data/processed/top_items_parquet:/app/data/top_items_parquet
       - hf_cache:/cache/huggingface

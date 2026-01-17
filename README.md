@@ -25,38 +25,38 @@ ScaleStyle moves beyond simple CRUD to a **Multi-Stage Inference Pipeline**.
 
 ```mermaid
 graph TD
-    User((User Client)) -->|HTTP/REST| Java[Java Gateway (Spring Boot)]
+    User(("User Client")) -->|HTTP/REST| Java["Java Gateway (Spring Boot)"]
     
     subgraph "Layer 1: The Guard (Java)"
-        Java -->|Auth & Rate Limit| JavaLogic[Request Processing]
-        JavaLogic -->|Circuit Breaker| RedisCache[(Redis L1 Cache)]
+        Java -->|"Auth & Rate Limit"| JavaLogic["Request Processing"]
+        JavaLogic -->|"Circuit Breaker"| RedisCache[("Redis L1 Cache")]
     end
     
-    JavaLogic -->|gRPC / Protobuf| Ray[Ray Serve Orchestrator]
+    JavaLogic -->|"gRPC / Protobuf"| Ray["Ray Serve Orchestrator"]
     
     subgraph "Layer 2: The Brain (Ray Serve)"
-        Ray --> Router{Intent Router}
+        Ray --> Router{"Intent Router"}
         
         %% Traffic Splitting Logic
-        Router -->|Intent: Browse| Popularity[Popularity Engine]
-        Router -->|Intent: Search| Hybrid[Hybrid Retrieval Engine]
+        Router -->|"Intent: Browse"| Popularity["Popularity Engine"]
+        Router -->|"Intent: Search"| Hybrid["Hybrid Retrieval Engine"]
         
         subgraph "Advanced RAG Pipeline"
-            Hybrid -->|Dense Vector + Scalar Filter| Milvus[(Milvus Vector DB)]
-            Milvus --> Candidates[Top-100 Candidates]
-            Candidates --> Reranker[BGE-Reranker (Cross-Encoder)]
-            Reranker -->|Top-10 Scores| TopK[Ranked Results]
-            TopK --> Reasoner[Reasoning Agent (Qwen2)]
+            Hybrid -->|"Dense Vector + Scalar Filter"| Milvus[("Milvus Vector DB")]
+            Milvus --> Candidates["Top-100 Candidates"]
+            Candidates --> Reranker["BGE-Reranker (Cross-Encoder)"]
+            Reranker -->|"Top-10 Scores"| TopK["Ranked Results"]
+            TopK --> Reasoner["Reasoning Agent (Qwen2)"]
         end
         
         subgraph "Multimodal Input"
-            Router -->|Image Upload| CLIP[Fashion-CLIP Encoder]
+            Router -->|"Image Upload"| CLIP["Fashion-CLIP Encoder"]
             CLIP --> Hybrid
         end
     end
     
-    Popularity -->|Fetch| RedisMeta[(Redis Metadata)]
-    Reasoner -->|GenAI Explanation| JavaLogic
+    Popularity -->|Fetch| RedisMeta[("Redis Metadata")]
+    Reasoner -->|"GenAI Explanation"| JavaLogic
 ```
 
 ### 🧠 Core Architectural Decisions
@@ -78,7 +78,7 @@ graph TD
 | **LLM & Vectors** | **Qwen2-7B, BGE-Reranker** | Semantic Embedding, Intent Classification, Reasoning. |
 | **Multimodal** | **Fashion-CLIP** | Image-to-Item and Text-to-Image search. |
 | **Data Store** | **Milvus 2.3** | High-performance Vector Database (IVF_FLAT Index). |
-| **Cache** | **Redis 7** | Metadata storage, Hot-item caching, Session management. |
+| **Cache** | **Redis 5** | Metadata storage, Hot-item caching, Session management. |
 | **Protocol** | **gRPC (Protobuf)** | Low-latency communication between Java and Ray. |
 | **Ops** | **Kubernetes (EKS), Terraform** | Cloud-native deployment, HPA (Auto-scaling). |
 | **Observability** | **Jaeger, Prometheus** | Distributed Tracing and Metrics monitoring. |

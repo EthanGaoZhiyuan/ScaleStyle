@@ -7,9 +7,9 @@ from typing import Any, Dict, List
 def _redis_client() -> redis.Redis:
     """
     Create and return a Redis client connection.
-    
+
     Reads connection parameters from environment variables with fallback defaults.
-    
+
     Returns:
         redis.Redis: Configured Redis client with string decoding enabled.
     """
@@ -22,16 +22,16 @@ def _redis_client() -> redis.Redis:
 class PopularityDeployment:
     """
     Ray Serve deployment for popularity-based recommendations.
-    
+
     This deployment retrieves globally popular items from Redis, which can be
     used as a fallback strategy or to augment personalized recommendations.
     Popular items are stored in a Redis list, with metadata stored in hash maps.
     """
-    
+
     def __init__(self):
         """
         Initialize the popularity deployment and connect to Redis.
-        
+
         Sets up Redis connection and configures the key for accessing
         the global popularity list.
         """
@@ -43,13 +43,13 @@ class PopularityDeployment:
     def topk(self, k: int) -> List[Dict[str, Any]]:
         """
         Retrieve the top-k most popular items.
-        
+
         Fetches article IDs from a Redis list (ordered by popularity) and
         enriches each with metadata stored in Redis hash maps.
-        
+
         Args:
             k: Number of popular items to retrieve.
-        
+
         Returns:
             List[Dict[str, Any]]: List of popular items with article_id, metadata, and score.
                 Score is set to None for popularity-based results.
@@ -57,7 +57,7 @@ class PopularityDeployment:
         # Retrieve top-k article IDs from Redis list (0-indexed, so k-1)
         ids = self.redis.lrange(self.key, 0, max(0, k - 1))
         out: List[Dict[str, Any]] = []
-        
+
         # Fetch metadata for each article from Redis hash maps
         for aid in ids:
             meta = self.redis.hgetall(f"item:{aid}") or {}

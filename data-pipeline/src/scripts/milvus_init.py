@@ -11,12 +11,14 @@ from pymilvus import (
     utility,
 )
 
-DATA_PATH = os.getenv("DATA_PATH", "data-pipeline/data/articles.parquet")
+DATA_PATH = os.getenv(
+    "DATA_PATH", "data-pipeline/data/article_embeddings_bge_v2.parquet"
+)
 EMBEDDING_COL = os.getenv("EMBEDDING_COL", "embedding")
 
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
 MILVUS_PORT = os.getenv("MILVUS_PORT", "19530")
-COLLECTION = os.getenv("MILVUS_COLLECTION", "scale_style_bge_v1")
+COLLECTION = os.getenv("MILVUS_COLLECTION", "scale_style_bge_v2")
 
 BATCH_SIZE = int(os.getenv("MILVUS_INSERT_BATCH", "2000"))
 

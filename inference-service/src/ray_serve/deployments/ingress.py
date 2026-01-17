@@ -34,13 +34,14 @@ app = FastAPI()
 class SearchRequest(BaseModel):
     """
     Request model for search/recommendation API.
-    
+
     Attributes:
         query: Search query string (minimum 1 character).
         k: Number of results to return (1-50, default 10).
         debug: Enable debug information in response (latency breakdown, etc.).
         user_id: Optional user identifier for personalization.
     """
+
     query: str = Field(..., min_length=1)
     k: int = Field(10, ge=1, le=50)
     debug: bool = False
@@ -50,9 +51,9 @@ class SearchRequest(BaseModel):
 def _redis_client() -> redis.Redis:
     """
     Create and return a Redis client connection.
-    
+
     Reads connection parameters from environment variables with fallback defaults.
-    
+
     Returns:
         redis.Redis: Configured Redis client with string decoding enabled.
     """
@@ -64,17 +65,17 @@ def _redis_client() -> redis.Redis:
 def _enrich_and_filter(r, candidates, filters, k, limit: Optional[int] = None):
     """
     Enrich candidates with metadata from Redis and apply post-retrieval filters.
-    
+
     Fetches item metadata from Redis and applies filters (color, price) that may not
     have been fully applied during vector search. Uses Redis pipeline for efficiency.
-    
+
     Args:
         r: Redis client instance.
         candidates: List of candidate items from retrieval (with article_id and score).
         filters: Dictionary of filter criteria (colour_group_name, price_lt).
         k: Target number of results (not strictly enforced, see limit).
         limit: Optional hard limit on number of results to return.
-    
+
     Returns:
         List[Dict]: Filtered and enriched results with article_id, score, and metadata.
     """
@@ -90,8 +91,8 @@ def _enrich_and_filter(r, candidates, filters, k, limit: Optional[int] = None):
             ids.append(str(aid))
 
     # Batch fetch metadata from Redis using pipeline for efficiency
-    # Returns all fields and values of the hash stored at key. 
-    # In the returned value, every field name is followed by its value, 
+    # Returns all fields and values of the hash stored at key.
+    # In the returned value, every field name is followed by its value,
     # so the length of the reply is twice the size of the hash.
     pipe = r.pipeline()
     for aid in ids:
@@ -125,16 +126,17 @@ def _enrich_and_filter(r, candidates, filters, k, limit: Optional[int] = None):
 
     return results
 
+
 def _build_rerank_doc(meta: dict) -> str:
     """
     Build a text document from item metadata for reranking.
-    
+
     Concatenates relevant metadata fields into a single text string that can be
     used by the reranker to compute semantic relevance to the query.
-    
+
     Args:
         meta: Dictionary containing item metadata fields.
-    
+
     Returns:
         str: Concatenated text document with fields separated by " | ".
     """
@@ -153,7 +155,7 @@ def _build_rerank_doc(meta: dict) -> str:
 class IngressDeployment:
     """
     Main ingress deployment for handling recommendation requests.
-    
+
     Orchestrates the full recommendation pipeline:
     1. Route intent detection (SEARCH vs BROWSE)
     2. Query embedding generation
@@ -161,10 +163,10 @@ class IngressDeployment:
     4. Metadata enrichment and filtering from Redis
     5. Reranking for improved relevance
     6. Fallback to popularity-based recommendations on failures
-    
+
     Exposes FastAPI endpoints for health checks and search.
     """
-    
+
     def __init__(
         self,
         router_handle: DeploymentHandle,
@@ -175,7 +177,7 @@ class IngressDeployment:
     ):
         """
         Initialize the ingress deployment with handles to other deployments.
-        
+
         Args:
             router_handle: Handle to router deployment for intent detection.
             embedding_handle: Handle to embedding deployment for query vectorization.
@@ -197,7 +199,7 @@ class IngressDeployment:
     async def healthz(self):
         """
         Basic health check endpoint.
-        
+
         Returns:
             dict: Simple ok status (always returns True if service is running).
         """
@@ -207,13 +209,13 @@ class IngressDeployment:
     async def readyz(self):
         """
         Comprehensive readiness check for all critical dependencies.
-        
+
         Checks Redis, embedding service, and retrieval service (Milvus) readiness.
         Returns 503 if any critical dependency is not ready.
-        
+
         Returns:
             dict: Readiness status for each dependency.
-        
+
         Raises:
             HTTPException: If Redis or embedding service is not ready (503).
         """
@@ -253,19 +255,19 @@ class IngressDeployment:
     async def search(self, req: SearchRequest):
         """
         Main search/recommendation endpoint.
-        
+
         Implements a multi-stage recommendation pipeline:
         1. Intent routing (BROWSE vs SEARCH)
         2. Query embedding (if SEARCH)
         3. Vector retrieval from Milvus
         4. Metadata enrichment and filtering
         5. Semantic reranking
-        
+
         Includes graceful degradation with popularity-based fallbacks at each stage.
-        
+
         Args:
             req: SearchRequest with query, k (result count), and optional user_id.
-        
+
         Returns:
             dict: Search results with query, route info, results, and optional debug info.
         """
@@ -374,9 +376,11 @@ class IngressDeployment:
             t_enrich0 = time.time()
             # Limit enrichment to top N candidates to control reranking cost
             enrich_limit = int(os.getenv("RERANK_MAX_DOCS", "100"))
-            results = _enrich_and_filter(self.redis, candidates, filters, req.k, limit=enrich_limit)
+            results = _enrich_and_filter(
+                self.redis, candidates, filters, req.k, limit=enrich_limit
+            )
             enrich_ms = (time.time() - t_enrich0) * 1000
-            
+
             # Fallback to popularity if all candidates filtered out
             if not results:
                 results = await self.popularity_handle.topk.remote(req.k)
@@ -389,13 +393,17 @@ class IngressDeployment:
                     scores = info.get("scores", [])
                     rerank_ms = info.get("rerank_ms")
                     rerank_mode = info.get("mode")
-                    
+
                     # Attach rerank scores to results
                     for i, r in enumerate(results):
-                        r["rerank_score"] = float(scores[i]) if i < len(scores) else -1e9
-                    
+                        r["rerank_score"] = (
+                            float(scores[i]) if i < len(scores) else -1e9
+                        )
+
                     # Sort by rerank score (higher is better)
-                    results.sort(key=lambda x: x.get("rerank_score", -1e9), reverse=True)
+                    results.sort(
+                        key=lambda x: x.get("rerank_score", -1e9), reverse=True
+                    )
                 except Exception as e:
                     # Continue without reranking on failure (use retrieval order)
                     logger.exception(
@@ -403,7 +411,7 @@ class IngressDeployment:
                         request_id,
                         e,
                     )
-                    
+
                 # Trim to requested number of results
                 results = results[: req.k]
         except Exception as e:

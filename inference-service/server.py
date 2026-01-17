@@ -67,7 +67,7 @@ class RecommendationService(recommendation_pb2_grpc.RecommendationServiceService
         if k <= 0:
             logger.warning(f"Invalid k value: {k}. Using default k=10.")
             k = 10
-        
+
         # Input validation: k should not exceed available items
         if k > len(self.top_items):
             logger.warning(
@@ -86,7 +86,9 @@ class RecommendationService(recommendation_pb2_grpc.RecommendationServiceService
             item.item_id = item_id
             item.score = 0.95  # Placeholder score (Phase 1 baseline)
 
-        logger.info(f"Returning {len(recommendations)} recommendations for user_id: {user_id}")
+        logger.info(
+            f"Returning {len(recommendations)} recommendations for user_id: {user_id}"
+        )
         return response
 
 

@@ -10,22 +10,23 @@ import os
 import re
 import time
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any
 
 from ray import serve
 
 logger = logging.getLogger("scalestyle.reranker")
 
+
 def _env_bool(name: str, default: bool = False) -> bool:
     """
     Read a boolean value from environment variable.
-    
+
     Accepts various truthy values: "1", "true", "yes", "y", "on" (case-insensitive).
-    
+
     Args:
         name: Environment variable name to read.
         default: Default value if variable is not set.
-    
+
     Returns:
         bool: Parsed boolean value or default.
     """
@@ -34,35 +35,37 @@ def _env_bool(name: str, default: bool = False) -> bool:
         return default
     return val.strip().lower() in ("1", "true", "yes", "y", "on")
 
+
 def _simple_tokenize(text: str) -> List[str]:
     """
     Simple tokenization for stub scoring.
-    
+
     Extracts lowercase alphanumeric tokens using regex. Used for the
     lightweight stub scoring fallback.
-    
+
     Args:
         text: Input text to tokenize.
-    
+
     Returns:
         List[str]: List of lowercase alphanumeric tokens.
     """
     return re.findall(r"[a-z0-9]+", (text or "").lower())
 
+
 def _stub_score(query: str, doc: str) -> float:
     """
     Lightweight stub scoring based on term overlap.
-    
+
     Computes a simple relevance score using:
     - Token overlap ratio (Jaccard-like similarity)
     - Length penalty to favor concise documents
-    
+
     Used as a fallback when CrossEncoder model is unavailable.
-    
+
     Args:
         query: Query string.
         doc: Document string to score.
-    
+
     Returns:
         float: Relevance score between 0.0 and 1.0.
     """
@@ -73,27 +76,28 @@ def _stub_score(query: str, doc: str) -> float:
         return 0.0
     # Calculate token overlap ratio
     overlap = len(q & d) / max(1, len(q))
-    
+
     # Apply length penalty to favor shorter, more concise documents
     length_penalty = 1.0 / (1.0 + (len(doc or "") / 500.0))
     return float(overlap * length_penalty)
+
 
 @serve.deployment
 class RerankerDeployment:
     """
     Ray Serve deployment for reranking search results.
-    
+
     Provides semantic reranking using either:
     1. CrossEncoder models (e.g., ms-marco-MiniLM) for production-quality scoring
     2. Stub scoring (token overlap) as a lightweight fallback
-    
+
     Configurable via environment variables for model selection and batch processing.
     """
-    
+
     def __init__(self):
         """
         Initialize the reranker deployment.
-        
+
         Loads CrossEncoder model if specified and available, otherwise falls back
         to stub scoring. Configuration is controlled via environment variables:
         - RERANKER_ENABLED: Enable/disable reranking
@@ -106,28 +110,30 @@ class RerankerDeployment:
         self.model_name: str = os.getenv("RERANK_MODEL", "stub").strip()
         self.batch_size: int = int(os.getenv("RERANK_BATCH_SIZE", "32"))
         self.max_docs: int = int(os.getenv("RERANK_MAX_DOCS", "100"))
-        
+
         # Initialize model state
         self._mode: str = "stub"  # Default to stub mode
         self._model = None
         self._tokenizer = None
-        
+
         # Early exit if reranker is disabled
         if not self.enabled:
             logger.info("Reranker is disabled via environment variable.")
             return
-        
+
         # Use stub mode if explicitly specified
         if self.model_name.lower() in {"stub", "dummy"}:
             self._mode = "stub"
             logger.info("Reranker using stub scoring model.")
             return
-        
+
         # Try to import sentence_transformers for CrossEncoder models
         try:
             from sentence_transformers import CrossEncoder
-        except Exception as e:
-            logger.warning("sentence_transformers not installed. Falling back to stub model.")
+        except Exception:
+            logger.warning(
+                "sentence_transformers not installed. Falling back to stub model."
+            )
             self._mode = "stub"
             return
 
@@ -137,38 +143,40 @@ class RerankerDeployment:
             self._mode = "cross-encoder"
             logger.info(f"Reranker using model: {self.model_name}")
         except Exception as e:
-            logger.error(f"Failed to load model {self.model_name}. Falling back to stub model. Error: {e}")
+            logger.error(
+                f"Failed to load model {self.model_name}. Falling back to stub model. Error: {e}"
+            )
             self._mode = "stub"
-            
+
     def is_enabled(self) -> bool:
         """
         Check if the reranker is enabled.
-        
+
         Returns:
             bool: True if reranker is enabled, False otherwise.
         """
         return bool(self.enabled)
-    
+
     def get_mode(self) -> str:
         """
         Get the current scoring mode.
-        
+
         Returns:
             str: "stub" for fallback scoring, "cross-encoder" for model-based scoring.
         """
         return self._mode
-    
+
     def score(self, query: str, docs: List[str]) -> Dict[str, Any]:
         """
         Score documents against a query for reranking.
-        
+
         Computes relevance scores for each document using either CrossEncoder model
         or stub scoring. Documents exceeding max_docs limit are scored with -1e9.
-        
+
         Args:
             query: Search query string.
             docs: List of document strings to score (typically metadata concatenations).
-        
+
         Returns:
             Dict[str, Any]: Dictionary containing:
                 - scores (List[float]): Relevance scores for each document
@@ -177,19 +185,19 @@ class RerankerDeployment:
                 - enabled (bool): Whether reranker is enabled
         """
         t0 = time.perf_counter()
-        
+
         # Return zero scores if disabled or no documents
         if not self.enabled or not docs:
             return {
                 "scores": [0.0] * len(docs),
                 "rerank_ms": (time.perf_counter() - t0) * 1000,
                 "mode": self._mode,
-                "enabled": self.enabled
+                "enabled": self.enabled,
             }
-            
+
         # Limit documents to max_docs for performance
-        docs_in = docs[:self.max_docs]
-        
+        docs_in = docs[: self.max_docs]
+
         # Compute scores based on available mode
         if self._mode == "stub" or self._model is None:
             # Use simple token overlap scoring
@@ -202,19 +210,20 @@ class RerankerDeployment:
                 scores = self._model.predict(pairs, batch_size=self.batch_size)
             except Exception as e:
                 # Fallback to stub scoring on model failure
-                logger.exception(f"Error during model prediction: {e}. Falling back to stub scoring.")
+                logger.exception(
+                    f"Error during model prediction: {e}. Falling back to stub scoring."
+                )
                 scores = [_stub_score(query, doc) for doc in docs_in]
-        
+
         # Pad scores with very low values for documents beyond max_docs limit
         if len(docs_in) < len(docs):
             pad = [-1e9] * (len(docs) - len(docs_in))
             scores = list(scores) + pad
-        
+
         # Return scores with metadata
         return {
             "scores": [float(s) for s in scores],
             "rerank_ms": (time.perf_counter() - t0) * 1000.0,
             "mode": self._mode,
-            "enabled": True
+            "enabled": True,
         }
-            
