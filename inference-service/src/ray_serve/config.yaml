@@ -1,0 +1,12 @@
+# src/ray_serve/config.yaml
+
+proxy_location: EveryNode
+
+http_options:
+  host: 0.0.0.0
+  port: 8000
+
+applications:
+  - name: scale_style_app
+    import_path: src.ray_serve.deployments.ingress:ingress_app
+    route_prefix: /

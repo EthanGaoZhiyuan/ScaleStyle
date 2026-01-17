@@ -28,9 +28,7 @@ _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, "recommendation_pb2", _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
     _globals["DESCRIPTOR"]._loaded_options = None
-    _globals[
-        "DESCRIPTOR"
-    ]._serialized_options = (
+    _globals["DESCRIPTOR"]._serialized_options = (
         b"\n\030com.example.gateway.grpcB\023RecommendationProtoP\001"
     )
     _globals["_USERREQUEST"]._serialized_start = 40

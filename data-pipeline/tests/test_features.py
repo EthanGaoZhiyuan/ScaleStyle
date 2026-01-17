@@ -32,7 +32,14 @@ def test_preprocess_customers_imputation(spark):
         ("user_2", 1, 1, 25, None, None),  # No Nulls
     ]
 
-    columns = ["customer_id", "FN", "Active", "age", "club_member_status", "fashion_news_frequency"]
+    columns = [
+        "customer_id",
+        "FN",
+        "Active",
+        "age",
+        "club_member_status",
+        "fashion_news_frequency",
+    ]
 
     input_df = spark.createDataFrame(data, columns)
 
@@ -204,10 +211,12 @@ def test_preprocess_transactions_logic(spark):
     assert isinstance(row_user_1.t_dat, date), "t_dat should be converted to date type"
 
     # Count Check
-    assert isinstance(row_user_1.article_purchase_count_scaled, float), (
-        "article_purchase_count should be float after scaling"
-    )
-    assert isinstance(row_user_1.price_scaled, float), "price should be float after scaling"
+    assert isinstance(
+        row_user_1.article_purchase_count_scaled, float
+    ), "article_purchase_count should be float after scaling"
+    assert isinstance(
+        row_user_1.price_scaled, float
+    ), "price should be float after scaling"
 
     print("\n test_preprocess_transactions_logic passed!")
 
@@ -237,13 +246,19 @@ def test_merge_datasets_logic(spark):
     merged_df = merge_datasets(transactions_df, customers_df, articles_df)
 
     # 5. Assertions
-    assert merged_df.count() == transactions_df.count(), "Row count should match transactions data"
+    assert (
+        merged_df.count() == transactions_df.count()
+    ), "Row count should match transactions data"
 
     # Check columns
     cols = merged_df.columns
-    assert "price" in cols, "Merged DataFrame should contain 'price' column from transactions"
+    assert (
+        "price" in cols
+    ), "Merged DataFrame should contain 'price' column from transactions"
     assert "age" in cols, "Merged DataFrame should contain 'age' column from customers"
-    assert "color" in cols, "Merged DataFrame should contain 'color' column from articles"
+    assert (
+        "color" in cols
+    ), "Merged DataFrame should contain 'color' column from articles"
 
     # Check value
     row_u1 = merged_df.filter(merged_df.customer_id == "u1").collect()[0]

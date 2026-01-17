@@ -62,7 +62,9 @@ def run_data_validation(bucket_name, s3_prefix):
     Use Ray to read uploaded data from MinIO for integrity validation.
     """
     s3_uri = f"{bucket_name}/{s3_prefix}"
-    logger.info(f"[Data Validation] Validating data in bucket: {bucket_name}, prefix: {s3_prefix}")
+    logger.info(
+        f"[Data Validation] Validating data in bucket: {bucket_name}, prefix: {s3_prefix}"
+    )
 
     try:
         # Initialize Ray if not already running
@@ -82,7 +84,9 @@ def run_data_validation(bucket_name, s3_prefix):
         ds = ray.data.read_parquet(s3_uri, filesystem=s3_fs)
         count = ds.count()
 
-        logger.info(f"[Data Validation] Successfully read dataset with {count} records.")
+        logger.info(
+            f"[Data Validation] Successfully read dataset with {count} records."
+        )
         if count > 0:
             logger.info("[Data Validation] Data validation passed.")
             return True
@@ -100,7 +104,9 @@ def run_data_validation(bucket_name, s3_prefix):
 
 def main():
     # --- 1. Argument Parsing ---
-    parser = argparse.ArgumentParser(description="ScaleStyle Data Pipeline Orchestrator")
+    parser = argparse.ArgumentParser(
+        description="ScaleStyle Data Pipeline Orchestrator"
+    )
 
     # Mode selection: Determines which steps to run
     parser.add_argument(
@@ -127,7 +133,10 @@ def main():
 
     # Path parameters
     parser.add_argument(
-        "--local_data_path", type=str, help="Local path to processed data", required=True
+        "--local_data_path",
+        type=str,
+        help="Local path to processed data",
+        required=True,
     )
     parser.add_argument(
         "--bucket_name", type=str, help="S3/MinIO bucket name", default="recsys-data"
@@ -152,7 +161,9 @@ def main():
 
     # Step 2: Upload to S3/MinIO
     if args.stage in ["upload", "all"]:
-        upload_success = run_s3_upload(args.local_data_path, args.bucket_name, args.s3_prefix)
+        upload_success = run_s3_upload(
+            args.local_data_path, args.bucket_name, args.s3_prefix
+        )
         if not upload_success:
             logger.error("Upload step failed. Exiting pipeline.")
             sys.exit(1)

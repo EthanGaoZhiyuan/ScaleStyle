@@ -1,0 +1,22 @@
+.git
+**/.git
+**/venv
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.idea
+**/.vscode
+**/ray_session*
+**/*.log
+**/*.pid
+.DS_Store
+
+# big data / artifacts
+data-pipeline/data
+**/*.parquet
+**/*.csv
+**/*.json
+**/*.bin
+**/*.safetensors

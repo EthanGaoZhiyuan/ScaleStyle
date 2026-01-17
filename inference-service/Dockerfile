@@ -1,7 +1,7 @@
-# Use a lightweight Python image as the base
+# Use official Python slim image as base
 FROM python:3.10-slim
 
-# Set the working directory inside the container
+# Set working directory
 WORKDIR /app
 
 # Install system dependencies
@@ -9,22 +9,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install PYthon dependencies
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the entire service code into the container
+# Copy application code
 COPY . .
 
 # Set environment variables
-# PYTHONUNBUFFERED ensures that the Python output is sent straight to terminal (e.g., your container log) without being buffered
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH="/app"
 
-# PYTHONPATH adds the proto directory to the Python path
-ENV PYTHONPATH="/app/src/proto"
+# HuggingFace cache (container-level defaults; compose/k8s should mount volume)
+ENV HF_HOME=/cache/huggingface
+ENV TRANSFORMERS_CACHE=/cache/huggingface/hub
+ENV HF_HUB_DISABLE_PROGRESS_BARS=1
 
-# Expose the gRPC port
-EXPOSE 50051
+# Expose port for Ray Serve
+EXPOSE 8000
 
-# Command to run the inference service
-CMD ["python", "server.py"]
+# Start Ray Serve with the specified configuration
+CMD ["serve", "run", "src/ray_serve/config.yaml"]
