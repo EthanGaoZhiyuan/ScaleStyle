@@ -107,9 +107,9 @@ class RerankerDeployment:
         """
         # Load configuration from environment
         self.enabled: bool = _env_bool("RERANKER_ENABLED", True)
-        self.model_name: str = os.getenv("RERANK_MODEL", "stub").strip()
-        self.batch_size: int = int(os.getenv("RERANK_BATCH_SIZE", "32"))
-        self.max_docs: int = int(os.getenv("RERANK_MAX_DOCS", "100"))
+        self.model_name: str = os.getenv("RERANKER_MODEL", "stub").strip()
+        self.batch_size: int = int(os.getenv("RERANKER_BATCH_SIZE", "32"))
+        self.max_docs: int = int(os.getenv("RERANKER_MAX_DOCS", "100"))
 
         # Initialize model state
         self._mode: str = "stub"  # Default to stub mode

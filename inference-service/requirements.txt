@@ -12,6 +12,7 @@ torch>=2.1.0          # PyTorch for tensor operations
 transformers>=4.37.0  # Hugging Face Transformers (Qwen2 needs new versions)
 accelerate>=0.26.0    # For efficient model loading/inference
 sentencepiece         # Tokenizer dependency
+sentence-transformers>=2.6.0  # For embedding models
 
 # ==========================================
 # Vector Database & Storage

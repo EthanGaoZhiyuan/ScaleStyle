@@ -52,10 +52,12 @@ services:
       - POPULARITY_KEY=global:popular
 
       # ----- Reranker -----
-      - RERANK_ENABLED=1
-      - RERANK_MODEL=stub
-      - RERANK_BATCH_SIZE=32
-      - RERANK_MAX_DOCS=100
+      - RERANKER_ENABLED=1
+      - RERANKER_BATCH_SIZE=32
+      - RERANKER_MAX_DOCS=100
+      - RERANKER_MODE=bge-reranker-base
+      - RERANKER_MODEL=BAAI/bge-reranker-base
+      - RAY_SERVE_RUN_SYNC_IN_THREADPOOL=1
     volumes:
       - ./data-pipeline/data/processed/top_items_parquet:/app/data/top_items_parquet
       - hf_cache:/cache/huggingface

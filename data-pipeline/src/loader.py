@@ -6,7 +6,9 @@ from pymilvus import MilvusClient
 from tqdm import tqdm
 
 # --- Configuration ---
-DATA_PATH = os.getenv("DATA_PATH", "data-pipeline/data/articles.parquet")
+DATA_PATH = os.getenv(
+    "DATA_PATH", "data-pipeline/data/article_embeddings_bge_detail.parquet"
+)
 
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
 MILVUS_PORT = os.getenv("MILVUS_PORT", "19530")

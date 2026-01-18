@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from ray import serve
 from ray.serve.handle import DeploymentHandle
 import json
+import hashlib
 
 # Import Ray Serve deployment classes
 from src.ray_serve.deployments.router import RouterDeployment
@@ -46,6 +47,14 @@ class SearchRequest(BaseModel):
     k: int = Field(10, ge=1, le=50)
     debug: bool = False
     user_id: Optional[str] = None
+
+
+def _bucket_flow(user_id: Optional[str]) -> str:
+    """Stable A/B bucket: even -> smart, odd -> base."""
+    if not user_id:
+        return "smart"
+    h = hashlib.md5(user_id.encode("utf-8")).hexdigest()
+    return "smart" if (int(h, 16) % 2 == 0) else "base"
 
 
 def _redis_client() -> redis.Redis:
@@ -277,7 +286,7 @@ class IngressDeployment:
 
         # Step 1: Route the query to determine intent and extract filters
         try:
-            route = await self.router_handle.route.remote(req.query)
+            route = await self.router_handle.route.remote(req.query, req.user_id)
         except Exception as e:
             logger.exception("request_id=%s route_failed err=%s", request_id, e)
             # Fallback to default SEARCH intent on routing failure
@@ -286,6 +295,12 @@ class IngressDeployment:
         # Extract intent and filters from routing result
         intent = route.get("intent", "SEARCH")
         filters = route.get("filters") or {}
+        flow = route.get("flow") or _bucket_flow(req.user_id)
+        route["flow"] = flow
+
+        enable_rerank = (os.getenv("RERANKER_ENABLED", "1") == "1") and (
+            flow == "smart"
+        )
 
         # Step 2: Handle BROWSE intent - return popular items directly
         if intent == "BROWSE":
@@ -337,7 +352,9 @@ class IngressDeployment:
         try:
             t_ret0 = time.time()
             # Increase candidate pool when filters are present (some will be filtered out)
-            candidate_k = 500 if filters else 200
+            recall_k = int(os.getenv("RECALL_K", "100"))
+            enrich_limit = int(os.getenv("RERANK_MAX_DOCS", "100"))
+            candidate_k = recall_k
             candidates = await self.retrieval_handle.search.remote(
                 vector,
                 top_k=req.k,
@@ -366,6 +383,12 @@ class IngressDeployment:
                     "retrieve": ret_ms,
                     "total": total_ms,
                 }
+                resp["pipeline"] = {
+                    "flow": flow,
+                    "recall_k": recall_k,
+                    "rerank_max_docs": enrich_limit,
+                    "rerank_enabled": enable_rerank,
+                }
             return resp
 
         # Step 5: Enrich candidates with metadata and apply post-retrieval filters
@@ -386,31 +409,34 @@ class IngressDeployment:
                 results = await self.popularity_handle.topk.remote(req.k)
             else:
                 # Step 6: Rerank results for improved semantic relevance
-                try:
-                    # Build text documents from metadata for reranking
-                    docs = [_build_rerank_doc(r.get("meta", {})) for r in results]
-                    info = await self.reranker_handle.score.remote(req.query, docs)
-                    scores = info.get("scores", [])
-                    rerank_ms = info.get("rerank_ms")
-                    rerank_mode = info.get("mode")
+                if enable_rerank:
+                    try:
+                        # Build text documents from metadata for reranking
+                        docs = [_build_rerank_doc(r.get("meta", {})) for r in results]
+                        info = await self.reranker_handle.score.remote(req.query, docs)
+                        scores = info.get("scores", [])
+                        rerank_ms = info.get("rerank_ms")
+                        rerank_mode = info.get("mode")
 
-                    # Attach rerank scores to results
-                    for i, r in enumerate(results):
-                        r["rerank_score"] = (
-                            float(scores[i]) if i < len(scores) else -1e9
+                        # Attach rerank scores to results
+                        for i, r in enumerate(results):
+                            r["rerank_score"] = (
+                                float(scores[i]) if i < len(scores) else -1e9
+                            )
+
+                        # Sort by rerank score (higher is better)
+                        results.sort(
+                            key=lambda x: x.get("rerank_score", -1e9), reverse=True
                         )
-
-                    # Sort by rerank score (higher is better)
-                    results.sort(
-                        key=lambda x: x.get("rerank_score", -1e9), reverse=True
-                    )
-                except Exception as e:
-                    # Continue without reranking on failure (use retrieval order)
-                    logger.exception(
-                        "request_id=%s rerank_failed err=%s -> continue without rerank",
-                        request_id,
-                        e,
-                    )
+                    except Exception as e:
+                        # Continue without reranking on failure (use retrieval order)
+                        logger.exception(
+                            "request_id=%s rerank_failed err=%s -> continue without rerank",
+                            request_id,
+                            e,
+                        )
+                else:
+                    rerank_mode = "off"
 
                 # Trim to requested number of results
                 results = results[: req.k]
