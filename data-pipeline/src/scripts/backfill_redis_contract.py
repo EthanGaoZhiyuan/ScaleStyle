@@ -7,6 +7,7 @@ detail_desc, price, and colour_group_name.
 """
 
 import os
+
 import redis
 
 # Redis connection configuration from environment variables
@@ -14,21 +15,29 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 
 # Fields that must be present in every item (even if empty)
-REQUIRED_FIELDS = ["title", "image_url", "department_name", "detail_desc", "price", "colour_group_name"]
+REQUIRED_FIELDS = [
+    "title",
+    "image_url",
+    "department_name",
+    "detail_desc",
+    "price",
+    "colour_group_name",
+]
+
 
 def image_path_from_article_id(article_id: str) -> str:
     """
     Generate image path from article ID.
-    
+
     Pads the article ID to 10 digits and constructs a path using the first
     3 digits as a folder name. This matches the expected image storage structure.
-    
+
     Args:
         article_id: Article identifier (will be zero-padded to 10 digits).
-    
+
     Returns:
         str: Image path in format /static/images/{folder}/{article_id}.jpg
-    
+
     Example:
         image_path_from_article_id("12345") -> "/static/images/000/0000012345.jpg"
     """
@@ -38,6 +47,7 @@ def image_path_from_article_id(article_id: str) -> str:
     # Use first 3 digits as folder name for organization
     folder = aid10[:3]
     return f"/static/images/{folder}/{aid10}.jpg"
+
 
 # Establish Redis connection with string decoding enabled
 r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
@@ -64,7 +74,7 @@ while True:
 
     # Prepare batch updates for items with missing fields
     pipe2 = r.pipeline()
-    for k, raw in zip(keys, rows, strict=True, strict=True):
+    for k, raw in zip(keys, rows, strict=True):
         # Extract article ID from metadata or key
         aid = raw.get("article_id") or k.split("item:")[-1]
 
