@@ -56,7 +56,6 @@ class PopularityDeployment:
         """
         # Retrieve top-k article IDs from Redis list (0-indexed, so k-1)
         ids = self.redis.lrange(self.key, 0, max(0, k - 1))
-        out: List[Dict[str, Any]] = []
 
         pipe = self.redis.pipeline()
         for aid in ids:

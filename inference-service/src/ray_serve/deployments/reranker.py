@@ -20,14 +20,14 @@ logger = logging.getLogger("scalestyle.reranker")
 def _env(*names: str, default: str | None = None) -> str | None:
     """
     Read environment variable with fallback to multiple names.
-    
+
     Supports backward compatibility by checking multiple environment variable names.
     Returns the first non-empty value found, or the default.
-    
+
     Args:
         *names: Variable names to check in order of priority.
         default: Default value if none of the variables are set.
-    
+
     Returns:
         str | None: First non-empty value found, or default.
     """
@@ -127,16 +127,26 @@ class RerankerDeployment:
         - RERANKER_MAX_DOCS / RERANK_MAX_DOCS: Maximum documents to rerank
         - RERANKER_DEVICE / RERANK_DEVICE: Device to use (cpu/cuda)
         - RERANKER_MODE / RERANK_MODE: Reranker mode
-        
+
         Note: Supports both RERANKER_* and RERANK_* prefixes for backward compatibility.
         """
         # Load configuration from environment (prioritize RERANKER_* names)
         self.enabled: bool = _env_bool("RERANKER_ENABLED", True)
-        self.model_name: str = (_env("RERANKER_MODEL", "RERANK_MODEL", default="stub") or "stub").strip()
-        self.batch_size: int = int(_env("RERANKER_BATCH_SIZE", "RERANK_BATCH_SIZE", default="16") or "16")
-        self.max_docs: int = int(_env("RERANKER_MAX_DOCS", "RERANK_MAX_DOCS", default="100") or "100")
-        self.device: str = (_env("RERANKER_DEVICE", "RERANK_DEVICE", default="cpu") or "cpu").strip()
-        self.mode: str = (_env("RERANKER_MODE", "RERANK_MODE", default="auto") or "auto").strip()
+        self.model_name: str = (
+            _env("RERANKER_MODEL", "RERANK_MODEL", default="stub") or "stub"
+        ).strip()
+        self.batch_size: int = int(
+            _env("RERANKER_BATCH_SIZE", "RERANK_BATCH_SIZE", default="16") or "16"
+        )
+        self.max_docs: int = int(
+            _env("RERANKER_MAX_DOCS", "RERANK_MAX_DOCS", default="100") or "100"
+        )
+        self.device: str = (
+            _env("RERANKER_DEVICE", "RERANK_DEVICE", default="cpu") or "cpu"
+        ).strip()
+        self.mode: str = (
+            _env("RERANKER_MODE", "RERANK_MODE", default="auto") or "auto"
+        ).strip()
 
         # Initialize model state
         self._mode: str = "stub"  # Default to stub mode
@@ -174,7 +184,7 @@ class RerankerDeployment:
                 f"Failed to load model {self.model_name}. Falling back to stub model. Error: {e}"
             )
             self._mode = "stub"
-            
+
         # Warmup the model if enabled (using consistent env var name)
         warmup = os.getenv("RERANKER_WARMUP", "1") == "1"
         if warmup and self._mode == "cross-encoder":

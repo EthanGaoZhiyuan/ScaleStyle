@@ -19,7 +19,6 @@ from ray.serve.handle import DeploymentHandle
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from ray import serve
-from collections import Counter
 
 # Import Ray Serve deployment classes
 from src.ray_serve.deployments.router import RouterDeployment
@@ -575,7 +574,6 @@ class IngressDeployment:
         enrich_ms = None
         rerank_ms = None
         rerank_mode = None
-        enrich_stats = None
         
         try:
             t_enrich0 = time.time()
@@ -664,7 +662,7 @@ class IngressDeployment:
             req.k,
             embed_ms or -1,
             ret_ms or -1,
-            total_ms,
+            enrich_ms or -1,
             json.dumps(filters, ensure_ascii=False),
         )
         return resp

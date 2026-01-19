@@ -64,7 +64,7 @@ while True:
 
     # Prepare batch updates for items with missing fields
     pipe2 = r.pipeline()
-    for k, raw in zip(keys, rows):
+    for k, raw in zip(keys, rows, strict=True, strict=True):
         # Extract article ID from metadata or key
         aid = raw.get("article_id") or k.split("item:")[-1]
 

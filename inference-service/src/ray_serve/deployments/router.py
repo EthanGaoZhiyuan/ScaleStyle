@@ -8,13 +8,13 @@ from typing import Optional
 class RouterDeployment:
     """
     Router deployment for query intent classification and A/B test bucketing.
-    
+
     Handles:
     1. Intent detection (BROWSE vs SEARCH)
     2. Filter extraction (color, price)
     3. A/B test flow assignment (smart vs base)
     """
-    
+
     def __init__(self):
         """
         Initialize router with color mappings and price extraction patterns.
@@ -33,14 +33,14 @@ class RouterDeployment:
     def _bucket(self, user_id: Optional[str]) -> int:
         """
         Assign user to A/B test bucket using stable hashing.
-        
+
         Uses MD5 hash for consistent bucket assignment across requests.
         Bucket 0 = smart flow (with reranking)
         Bucket 1 = base flow (without reranking)
-        
+
         Args:
             user_id: User identifier, or None for default bucket.
-        
+
         Returns:
             int: 0 for smart flow, 1 for base flow.
         """
@@ -57,11 +57,11 @@ class RouterDeployment:
     def route(self, query: str, user_id: str | None = None) -> dict:
         """
         Route query to appropriate intent and extract filters.
-        
+
         Args:
             query: User search query.
             user_id: Optional user identifier for A/B bucketing.
-        
+
         Returns:
             dict: Routing result with intent, filters, and flow assignment.
         """
