@@ -10,15 +10,16 @@ import os
 import time
 import uuid
 import logging
-from typing import Optional
-
 import redis
+import json
+import hashlib
+import asyncio
+from typing import Optional
+from ray.serve.handle import DeploymentHandle
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from ray import serve
-from ray.serve.handle import DeploymentHandle
-import json
-import hashlib
+from collections import Counter
 
 # Import Ray Serve deployment classes
 from src.ray_serve.deployments.router import RouterDeployment
@@ -31,6 +32,8 @@ logger = logging.getLogger("scalestyle.ingress")
 # FastAPI application for HTTP endpoints
 app = FastAPI()
 
+# Required fields that must be present in every result item for API contract compliance
+CONTRACT_FIELDS = ("title", "image_url", "dept", "desc", "price", "color")
 
 class SearchRequest(BaseModel):
     """
@@ -48,12 +51,174 @@ class SearchRequest(BaseModel):
     debug: bool = False
     user_id: Optional[str] = None
 
+def _local_image_url(article_id: str) -> str:
+    """
+    Generate local static image URL from article ID.
+    
+    Uses the same format as backfill_redis_contract.py for consistency.
+    Generates path: /static/images/{folder}/{article_id}.jpg
+    where folder is the first 3 digits of the zero-padded article ID.
+    
+    Args:
+        article_id: Article identifier.
+    
+    Returns:
+        str: Local static image path, or empty string if article_id is invalid.
+    """
+    if not article_id:
+        return ""
+    # Zero-pad to 10 digits for consistent formatting
+    aid = str(article_id).strip().zfill(10)
+    # Use first 3 digits as folder for organization
+    folder = aid[:3]
+    return f"/static/images/{folder}/{aid}.jpg"
+    
+    
+
+def _contract_normalize(results: list, limit: int):
+    """
+    Normalize results to a stable contract WITHOUT querying Redis again.
+
+    Contract meta fields:
+      title / image_url / dept / desc / price / color
+      
+    Note: Only generates image_url if explicitly missing. Uses local static path
+    format consistent with backfill_redis_contract.py.
+
+    Returns:
+      (normalized_results, contract_debug)
+    """
+    required = ["title", "image_url", "dept", "desc", "price", "color"]
+    missing_by_field = {k: 0 for k in required}
+
+    out = []
+    for r in (results or [])[:limit]:
+        raw = (r.get("meta") or {}) if isinstance(r, dict) else {}
+        aid = str(r.get("article_id") or raw.get("article_id") or "")
+
+        # build stable meta
+        title = (
+            raw.get("prod_name")
+            or raw.get("title")
+            or raw.get("product_type_name")
+            or raw.get("product_group_name")
+            or ""
+        )
+        # Only generate image_url if completely missing (prefer empty over invalid URL)
+        existing_image = raw.get("image_url", "").strip()
+        image_url = existing_image if existing_image else _local_image_url(aid)
+        
+        dept = raw.get("department_name") or raw.get("dept") or ""
+        desc = raw.get("detail_desc") or raw.get("desc") or ""
+        color = raw.get("colour_group_name") or raw.get("color") or ""
+
+        price_val = raw.get("price")
+        try:
+            price = float(price_val) if price_val not in (None, "") else None
+        except Exception:
+            price = None
+
+        meta = {
+            "title": title,
+            "image_url": image_url,
+            "dept": dept,
+            "desc": desc,
+            "price": price,
+            "color": color,
+        }
+
+        # count missing fields
+        for k in required:
+            v = meta.get(k)
+            if v is None or (isinstance(v, str) and v.strip() == ""):
+                missing_by_field[k] += 1
+
+        # overwrite meta to be contract-stable (so clients rely on fixed keys)
+        r["article_id"] = int(aid) if aid.isdigit() else aid
+        r["meta"] = meta
+        out.append(r)
+
+    missing_total = sum(missing_by_field.values())
+    return out, {"missing_total": missing_total, "missing_by_field": missing_by_field}
+    
+def _normalize_meta(article_id: str, raw: dict) -> dict:
+    """
+    Normalize and standardize item metadata for API contract compliance.
+    
+    Extracts metadata fields from raw Redis data, generates fallback values
+    for missing fields, and identifies which required contract fields are
+    missing or empty.
+    
+    Args:
+        article_id: Item article identifier.
+        raw: Raw metadata dictionary from Redis.
+    
+    Returns:
+        tuple: (normalized_meta_dict, list_of_missing_fields)
+    """
+    # Helper to safely get field with None-safe default handling
+    def g(k: str, default: str = "") -> str:
+        v = raw.get(k, default) if raw else default
+        return v if v is not None else default
+    
+    # Extract metadata fields from raw data
+    color = g("colour_group_name", "")
+    dept = g("department_name", "")
+    desc = g("detail_desc", "")
+    price = g("price", "")
+    product_type = g("product_type_name", "")
+    prod_name = g("prod_name", "")
+    
+    # Generate title with fallback hierarchy: prod_name > product_type > color-based > generic
+    title = prod_name or product_type or (f"{color} item" if color else "item")
+    
+    # Get stored image URL (prefer existing value, only generate if completely missing)
+    image_url = g("image_url", "")
+    
+    if not image_url:
+        # Generate local static image path consistent with backfill script
+        image_url = _local_image_url(article_id)
+        
+    # Build normalized metadata dictionary with contract-compliant fields
+    meta = {
+        "article_id": article_id,
+        "title": title,
+        "image_url": image_url,
+        "dept": dept,
+        "desc": desc,
+        "price": price,
+        "color": color,
+        "product_type_name": product_type,
+    }
+    
+    # Identify missing or empty required contract fields
+    missing = []
+    for f in CONTRACT_FIELDS:
+        v = meta.get(f, "")
+        if v is None or (isinstance(v, str) and not v.strip()):
+            missing.append(f)
+    
+    return meta, missing
 
 def _bucket_flow(user_id: Optional[str]) -> str:
-    """Stable A/B bucket: even -> smart, odd -> base."""
+    """
+    Determine A/B test bucket for user using stable hashing.
+    
+    Uses MD5 hash of user_id to consistently assign users to either "smart"
+    (with reranking) or "base" (without reranking) flow. Even hash values
+    get "smart", odd get "base".
+    
+    Args:
+        user_id: Optional user identifier. If None, defaults to "smart".
+    
+    Returns:
+        str: Either "smart" or "base" flow identifier.
+    """
     if not user_id:
         return "smart"
+    # Hash user_id for stable, deterministic bucketing
     h = hashlib.md5(user_id.encode("utf-8")).hexdigest()
+    # Even hash -> smart flow, odd hash -> base flow
     return "smart" if (int(h, 16) % 2 == 0) else "base"
 
 
@@ -106,12 +271,16 @@ def _enrich_and_filter(r, candidates, filters, k, limit: Optional[int] = None):
     pipe = r.pipeline()
     for aid in ids:
         pipe.hgetall(f"item:{aid}")
-    metas = pipe.execute()
+    metas = pipe.execute(raise_on_error=False)
 
     # Apply filters and build enriched results
     results = []
     for c, meta in zip(candidates, metas):
         aid = c.get("article_id")
+        # Log Redis pipeline errors properly
+        if isinstance(meta, Exception):
+            logger.warning("redis_hgetall_failed key=item:%s err=%s", aid, meta)
+            continue
         # Skip if metadata is missing
         if not meta:
             continue
@@ -283,6 +452,48 @@ class IngressDeployment:
         # Generate unique request ID for tracing and logging
         request_id = str(uuid.uuid4())
         t0 = time.time()
+        
+        # Load configuration (support both RERANKER_* and RERANK_* prefixes)
+        recall_k = int(os.getenv("RECALL_K", "100"))
+        enrich_limit = int(os.getenv("RERANKER_MAX_DOCS") or os.getenv("RERANK_MAX_DOCS", "100"))
+        timeout_ms = int(os.getenv("RERANKER_TIMEOUT_MS", "1200"))
+        
+        # Unified return helper to ensure consistent contract normalization
+        def _build_response(results, route, latency_patch=None, extra_debug=None):
+            """Helper to build response with contract normalization for all branches."""
+            # Always normalize results for contract compliance (fix: no redis parameter needed)
+            results, contract_dbg = _contract_normalize(results, limit=req.k)
+            
+            total_ms = (time.time() - t0) * 1000
+            resp = {
+                "query": req.query,
+                "route": route,
+                "results": results,
+                "request_id": request_id,
+            }
+            
+            if req.debug:
+                # Build latency object
+                latency = latency_patch or {}
+                latency["total"] = total_ms
+                resp["latency_ms"] = latency
+                
+                # Add pipeline configuration
+                resp["pipeline"] = {
+                    "flow": route.get("flow", "smart"),
+                    "recall_k": recall_k,
+                    "rerank_max_docs": enrich_limit,
+                    "rerank_enabled": (os.getenv("RERANKER_ENABLED", "1") == "1") and (route.get("flow") == "smart"),
+                }
+                
+                # Add contract compliance stats
+                resp["contract"] = contract_dbg
+                
+                # Add any extra debug info
+                if extra_debug:
+                    resp.update(extra_debug)
+            
+            return resp
 
         # Step 1: Route the query to determine intent and extract filters
         try:
@@ -295,9 +506,11 @@ class IngressDeployment:
         # Extract intent and filters from routing result
         intent = route.get("intent", "SEARCH")
         filters = route.get("filters") or {}
+        # Determine A/B test flow: smart (with reranking) or base (without reranking)
         flow = route.get("flow") or _bucket_flow(req.user_id)
         route["flow"] = flow
 
+        # Enable reranking only if globally enabled AND user is in "smart" flow
         enable_rerank = (os.getenv("RERANKER_ENABLED", "1") == "1") and (
             flow == "smart"
         )
@@ -305,22 +518,13 @@ class IngressDeployment:
         # Step 2: Handle BROWSE intent - return popular items directly
         if intent == "BROWSE":
             results = await self.popularity_handle.topk.remote(req.k)
-            total_ms = (time.time() - t0) * 1000
-            resp = {
-                "query": req.query,
-                "route": route,
-                "results": results,
-                "request_id": request_id,
-            }
-            if req.debug:
-                resp["latency_ms"] = {"total": total_ms}
+            
             logger.info(
-                "request_id=%s intent=BROWSE k=%d total_ms=%.2f",
+                "request_id=%s intent=BROWSE k=%d",
                 request_id,
                 req.k,
-                total_ms,
             )
-            return resp
+            return _build_response(results, route)
 
         # Step 3: Generate query embedding for semantic search
         embed_ms = None
@@ -336,24 +540,15 @@ class IngressDeployment:
                 e,
             )
             results = await self.popularity_handle.topk.remote(req.k)
-            total_ms = (time.time() - t0) * 1000
-            resp = {
-                "query": req.query,
-                "route": route,
-                "results": results,
-                "request_id": request_id,
-            }
-            if req.debug:
-                resp["latency_ms"] = {"embed": embed_ms, "total": total_ms}
-            return resp
+            return _build_response(results, route, latency_patch={"embed": embed_ms})
 
         # Step 4: Retrieve candidates from Milvus using vector similarity
         ret_ms = None
         try:
             t_ret0 = time.time()
-            # Increase candidate pool when filters are present (some will be filtered out)
-            recall_k = int(os.getenv("RECALL_K", "100"))
-            enrich_limit = int(os.getenv("RERANK_MAX_DOCS", "100"))
+            # Configure retrieval and reranking limits from environment
+            recall_k = int(os.getenv("RECALL_K", "100"))  # Number of candidates to retrieve
+            enrich_limit = int(os.getenv("RERANK_MAX_DOCS", "100"))  # Max docs to rerank
             candidate_k = recall_k
             candidates = await self.retrieval_handle.search.remote(
                 vector,
@@ -370,35 +565,23 @@ class IngressDeployment:
                 e,
             )
             results = await self.popularity_handle.topk.remote(req.k)
-            total_ms = (time.time() - t0) * 1000
-            resp = {
-                "query": req.query,
-                "route": route,
-                "results": results,
-                "request_id": request_id,
-            }
-            if req.debug:
-                resp["latency_ms"] = {
-                    "embed": embed_ms,
-                    "retrieve": ret_ms,
-                    "total": total_ms,
-                }
-                resp["pipeline"] = {
-                    "flow": flow,
-                    "recall_k": recall_k,
-                    "rerank_max_docs": enrich_limit,
-                    "rerank_enabled": enable_rerank,
-                }
-            return resp
+            return _build_response(
+                results, 
+                route, 
+                latency_patch={"embed": embed_ms, "retrieve": ret_ms}
+            )
 
         # Step 5: Enrich candidates with metadata and apply post-retrieval filters
         enrich_ms = None
         rerank_ms = None
         rerank_mode = None
+        enrich_stats = None
+        
         try:
             t_enrich0 = time.time()
             # Limit enrichment to top N candidates to control reranking cost
             enrich_limit = int(os.getenv("RERANK_MAX_DOCS", "100"))
+            # Filter and enrich candidates with metadata
             results = _enrich_and_filter(
                 self.redis, candidates, filters, req.k, limit=enrich_limit
             )
@@ -408,65 +591,71 @@ class IngressDeployment:
             if not results:
                 results = await self.popularity_handle.topk.remote(req.k)
             else:
-                # Step 6: Rerank results for improved semantic relevance
+                # Step 6: Rerank results for improved semantic relevance (if enabled for user's flow)
                 if enable_rerank:
                     try:
-                        # Build text documents from metadata for reranking
                         docs = [_build_rerank_doc(r.get("meta", {})) for r in results]
-                        info = await self.reranker_handle.score.remote(req.query, docs)
-                        scores = info.get("scores", [])
-                        rerank_ms = info.get("rerank_ms")
-                        rerank_mode = info.get("mode")
+                        t_rr0 = time.time()
 
-                        # Attach rerank scores to results
-                        for i, r in enumerate(results):
-                            r["rerank_score"] = (
-                                float(scores[i]) if i < len(scores) else -1e9
+                        try:
+                            info = await asyncio.wait_for(
+                                self.reranker_handle.score.remote(req.query, docs),
+                                timeout=timeout_ms / 1000.0,
                             )
+                        except asyncio.TimeoutError:
+                            rerank_mode = "timeout"
+                            rerank_ms = float(timeout_ms)
+                            logger.warning(
+                                "request_id=%s rerank_timeout timeout_ms=%d -> skip rerank",
+                                request_id,
+                                timeout_ms,
+                            )
+                            info = None
 
-                        # Sort by rerank score (higher is better)
-                        results.sort(
-                            key=lambda x: x.get("rerank_score", -1e9), reverse=True
-                        )
+                        if info:
+                            scores = info.get("scores", [])
+                            rerank_ms = info.get("rerank_ms", (time.time() - t_rr0) * 1000)
+                            rerank_mode = info.get("mode", rerank_mode)
+
+                            for i, r in enumerate(results):
+                                r["rerank_score"] = float(scores[i]) if i < len(scores) else -1e9
+
+                            results.sort(key=lambda x: x.get("rerank_score", -1e9), reverse=True)
+
                     except Exception as e:
-                        # Continue without reranking on failure (use retrieval order)
                         logger.exception(
                             "request_id=%s rerank_failed err=%s -> continue without rerank",
                             request_id,
                             e,
                         )
                 else:
+                    # Reranking disabled for this user's flow
                     rerank_mode = "off"
 
                 # Trim to requested number of results
                 results = results[: req.k]
         except Exception as e:
-            # Fallback to popularity on enrichment/filtering failure
+            # Fallback to popularity on enrichment/filtering failure (P0-2: also needs contract normalize)
             logger.exception(
                 "request_id=%s enrich_filter_failed err=%s -> fallback popularity",
                 request_id,
                 e,
             )
             results = await self.popularity_handle.topk.remote(req.k)
+            return _build_response(
+                results,
+                route,
+                latency_patch={"embed": embed_ms, "retrieve": ret_ms, "enrich": enrich_ms, "rerank": rerank_ms},
+                extra_debug={"rerank": {"mode": rerank_mode}} if rerank_mode else None
+            )
 
-        # Build final response with timing information
-        total_ms = (time.time() - t0) * 1000
-        resp = {
-            "query": req.query,
-            "route": route,
-            "results": results,
-            "request_id": request_id,
-        }
-        # Include detailed latency breakdown if debug mode enabled
-        if req.debug:
-            resp["latency_ms"] = {
-                "embed": embed_ms,
-                "retrieve": ret_ms,
-                "enrich": enrich_ms,
-                "rerank": rerank_ms,
-                "total": total_ms,
-            }
-            resp["rerank"] = {"mode": rerank_mode}
+        # Build final response using unified helper (P0-1: ensures contract_dbg is always defined)
+        resp = _build_response(
+            results,
+            route,
+            latency_patch={"embed": embed_ms, "retrieve": ret_ms, "enrich": enrich_ms, "rerank": rerank_ms},
+            extra_debug={"rerank": {"mode": rerank_mode}} if rerank_mode else None
+        )
 
         # Log request metrics for monitoring and analysis
         logger.info(

@@ -51,12 +51,14 @@ services:
       # ----- Popularity -----
       - POPULARITY_KEY=global:popular
 
-      # ----- Reranker -----
+      # ----- Reranker (unified RERANKER_* prefix for consistency) -----
       - RERANKER_ENABLED=1
+      - RERANKER_MODEL=BAAI/bge-reranker-base
+      - RERANKER_DEVICE=cpu
       - RERANKER_BATCH_SIZE=32
       - RERANKER_MAX_DOCS=100
-      - RERANKER_MODE=bge-reranker-base
-      - RERANKER_MODEL=BAAI/bge-reranker-base
+      - RERANKER_MODE=cross-encoder
+      - RERANKER_TIMEOUT_MS=1200
       - RAY_SERVE_RUN_SYNC_IN_THREADPOOL=1
     volumes:
       - ./data-pipeline/data/processed/top_items_parquet:/app/data/top_items_parquet

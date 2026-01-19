@@ -58,14 +58,20 @@ class PopularityDeployment:
         ids = self.redis.lrange(self.key, 0, max(0, k - 1))
         out: List[Dict[str, Any]] = []
 
-        # Fetch metadata for each article from Redis hash maps
+        pipe = self.redis.pipeline()
         for aid in ids:
-            meta = self.redis.hgetall(f"item:{aid}") or {}
-            out.append(
+            pipe.hgetall(f"item:{aid}")
+        rows = pipe.execute(raise_on_error=False)
+
+        results = []
+        for idx, (aid, meta) in enumerate(zip(ids, rows)):
+            if isinstance(meta, Exception):
+                meta = {}
+            results.append(
                 {
                     "article_id": int(aid) if str(aid).isdigit() else aid,
-                    "meta": meta,
-                    "score": None,  # No similarity score for popularity-based results
+                    "score": float(len(ids) - idx),
+                    "meta": meta or {},
                 }
             )
-        return out
+        return results

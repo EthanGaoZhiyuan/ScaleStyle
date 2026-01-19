@@ -17,6 +17,27 @@ from ray import serve
 logger = logging.getLogger("scalestyle.reranker")
 
 
+def _env(*names: str, default: str | None = None) -> str | None:
+    """
+    Read environment variable with fallback to multiple names.
+    
+    Supports backward compatibility by checking multiple environment variable names.
+    Returns the first non-empty value found, or the default.
+    
+    Args:
+        *names: Variable names to check in order of priority.
+        default: Default value if none of the variables are set.
+    
+    Returns:
+        str | None: First non-empty value found, or default.
+    """
+    for n in names:
+        v = os.getenv(n)
+        if v is not None and str(v).strip() != "":
+            return v
+    return default
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     """
     Read a boolean value from environment variable.
@@ -101,15 +122,21 @@ class RerankerDeployment:
         Loads CrossEncoder model if specified and available, otherwise falls back
         to stub scoring. Configuration is controlled via environment variables:
         - RERANKER_ENABLED: Enable/disable reranking
-        - RERANK_MODEL: Model name or "stub" for fallback
-        - RERANK_BATCH_SIZE: Batch size for model inference
-        - RERANK_MAX_DOCS: Maximum documents to rerank
+        - RERANKER_MODEL / RERANK_MODEL: Model name or "stub" for fallback
+        - RERANKER_BATCH_SIZE / RERANK_BATCH_SIZE: Batch size for model inference
+        - RERANKER_MAX_DOCS / RERANK_MAX_DOCS: Maximum documents to rerank
+        - RERANKER_DEVICE / RERANK_DEVICE: Device to use (cpu/cuda)
+        - RERANKER_MODE / RERANK_MODE: Reranker mode
+        
+        Note: Supports both RERANKER_* and RERANK_* prefixes for backward compatibility.
         """
-        # Load configuration from environment
+        # Load configuration from environment (prioritize RERANKER_* names)
         self.enabled: bool = _env_bool("RERANKER_ENABLED", True)
-        self.model_name: str = os.getenv("RERANKER_MODEL", "stub").strip()
-        self.batch_size: int = int(os.getenv("RERANKER_BATCH_SIZE", "32"))
-        self.max_docs: int = int(os.getenv("RERANKER_MAX_DOCS", "100"))
+        self.model_name: str = (_env("RERANKER_MODEL", "RERANK_MODEL", default="stub") or "stub").strip()
+        self.batch_size: int = int(_env("RERANKER_BATCH_SIZE", "RERANK_BATCH_SIZE", default="16") or "16")
+        self.max_docs: int = int(_env("RERANKER_MAX_DOCS", "RERANK_MAX_DOCS", default="100") or "100")
+        self.device: str = (_env("RERANKER_DEVICE", "RERANK_DEVICE", default="cpu") or "cpu").strip()
+        self.mode: str = (_env("RERANKER_MODE", "RERANK_MODE", default="auto") or "auto").strip()
 
         # Initialize model state
         self._mode: str = "stub"  # Default to stub mode
@@ -147,6 +174,16 @@ class RerankerDeployment:
                 f"Failed to load model {self.model_name}. Falling back to stub model. Error: {e}"
             )
             self._mode = "stub"
+            
+        # Warmup the model if enabled (using consistent env var name)
+        warmup = os.getenv("RERANKER_WARMUP", "1") == "1"
+        if warmup and self._mode == "cross-encoder":
+            try:
+                t0 = time.time()
+                _ = self._model.predict([("warmup query", "warmup doc")])
+                logger.info("reranker warmup ok %.1fms", (time.time() - t0) * 1000)
+            except Exception as e:
+                logger.warning("reranker warmup failed: %s", e)
 
     def is_enabled(self) -> bool:
         """

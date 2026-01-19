@@ -77,7 +77,7 @@ class EmbeddingDeployment:
 
         # Load model and move to appropriate device
         t1 = time.time()
-        self.model = AutoModel.from_pretrained(self.model_name, torch_dtype=self.dtype)
+        self.model = AutoModel.from_pretrained(self.model_name, dtype=self.dtype)
         # Set model to evaluation mode (disable dropout, etc.)
         self.model.to(self.device).eval()
         t_model = (time.time() - t1) * 1000
