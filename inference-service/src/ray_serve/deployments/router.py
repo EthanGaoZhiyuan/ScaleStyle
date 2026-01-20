@@ -54,9 +54,11 @@ class RouterDeployment:
         h = hashlib.md5(user_id.encode("utf-8")).hexdigest()
         return int(h, 16) % 2
 
-    def route(self, query: str, user_id: str | None = None) -> dict:
+    async def route(self, query: str, user_id: str | None = None) -> dict:
         """
-        Route query to appropriate intent and extract filters.
+        Route query to appropriate intent and extract filters (async).
+
+        Wraps the routing logic to be fully async-compatible with Ray Serve.
 
         Args:
             query: User search query.

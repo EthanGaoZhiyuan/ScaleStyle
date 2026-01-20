@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from ray import serve
 from pymilvus import MilvusClient
 import os
@@ -46,6 +47,9 @@ class RetrievalDeployment:
             self.ready = False
             return
 
+        # Initialize lock for thread safety during concurrent requests
+        self._lock = asyncio.Lock()
+
         # Load the collection into memory for search operations
         try:
             self.client.load_collection(self.collection_name)
@@ -55,7 +59,7 @@ class RetrievalDeployment:
             logger.exception("Milvus load_collection failed: %s", e)
             self.ready = False
 
-    def is_ready(self) -> bool:
+    async def is_ready(self) -> bool:
         """
         Check if the retrieval service is ready to handle requests.
 
@@ -91,7 +95,7 @@ class RetrievalDeployment:
         # Combine multiple filters with AND logic
         return " and ".join(exprs) if exprs else None
 
-    def search(
+    def _search_impl(
         self,
         vector: List[float],
         top_k: int = 10,
@@ -99,7 +103,10 @@ class RetrievalDeployment:
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Perform vector similarity search in Milvus.
+        Synchronous Milvus search implementation (I/O intensive).
+
+        This method contains the actual Milvus search operation and will be run
+        in a thread pool to avoid blocking the event loop.
 
         Args:
             vector: Query embedding vector for similarity search.
@@ -109,15 +116,7 @@ class RetrievalDeployment:
 
         Returns:
             List[Dict[str, Any]]: List of search results with article_id and similarity score.
-
-        Raises:
-            RuntimeError: If the retrieval service is not ready.
         """
-        # Ensure the service is ready before searching
-        if not self.ready:
-            raise RuntimeError(
-                "Retrieval not ready (Milvus collection missing or not loaded)"
-            )
 
         t0 = time.time()
         # Configure search parameters: COSINE similarity with nprobe=10
@@ -174,3 +173,37 @@ class RetrievalDeployment:
         )
         # Return results limited to candidate_k
         return out[:candidate_k]
+
+    async def search(
+        self,
+        vector: List[float],
+        top_k: int = 10,
+        candidate_k: int = 200,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Perform vector similarity search in Milvus (async wrapper).
+
+        Args:
+            vector: Query embedding vector for similarity search.
+            top_k: Number of top results to return (not currently used in return).
+            candidate_k: Maximum number of candidates to retrieve from Milvus.
+            filters: Optional filter criteria (color, price, etc.).
+
+        Returns:
+            List[Dict[str, Any]]: List of search results with article_id and similarity score.
+
+        Raises:
+            RuntimeError: If the retrieval service is not ready.
+        """
+        # Ensure the service is ready before searching
+        if not self.ready:
+            raise RuntimeError(
+                "Retrieval not ready (Milvus collection missing or not loaded)"
+            )
+
+        # Run I/O-intensive Milvus search in thread pool with lock for safety
+        async with self._lock:
+            return await asyncio.to_thread(
+                self._search_impl, vector, top_k, candidate_k, filters
+            )

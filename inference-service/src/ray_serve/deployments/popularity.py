@@ -1,5 +1,6 @@
 import os
 import redis
+import asyncio
 from ray import serve
 from typing import Any, Dict, List
 
@@ -40,12 +41,15 @@ class PopularityDeployment:
         # Configure the Redis key for the global popularity list
         self.key = os.getenv("POPULARITY_KEY", "global:popular")
 
-    def topk(self, k: int) -> List[Dict[str, Any]]:
+    async def topk(self, k: int) -> List[Dict[str, Any]]:
         """
-        Retrieve the top-k most popular items.
+        Retrieve the top-k most popular items (async).
 
         Fetches article IDs from a Redis list (ordered by popularity) and
         enriches each with metadata stored in Redis hash maps.
+
+        Uses asyncio.to_thread() to prevent Redis operations from blocking
+        the Ray Serve event loop.
 
         Args:
             k: Number of popular items to retrieve.
@@ -54,16 +58,17 @@ class PopularityDeployment:
             List[Dict[str, Any]]: List of popular items with article_id, metadata, and score.
                 Score is set to None for popularity-based results.
         """
-        # Retrieve top-k article IDs from Redis list (0-indexed, so k-1)
-        ids = self.redis.lrange(self.key, 0, max(0, k - 1))
+        # Retrieve top-k article IDs from Redis list (0-indexed, so k-1) - async
+        ids = await asyncio.to_thread(self.redis.lrange, self.key, 0, max(0, k - 1))
 
         pipe = self.redis.pipeline()
         for aid in ids:
             pipe.hgetall(f"item:{aid}")
-        rows = pipe.execute(raise_on_error=False)
+        # Execute pipeline async to avoid blocking
+        rows = await asyncio.to_thread(pipe.execute, raise_on_error=False)
 
         results = []
-        for idx, (aid, meta) in enumerate(zip(ids, rows)):
+        for idx, (aid, meta) in enumerate(zip(ids, rows, strict=True)):
             if isinstance(meta, Exception):
                 meta = {}
             results.append(

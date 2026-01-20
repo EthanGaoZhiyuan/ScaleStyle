@@ -1,6 +1,7 @@
 import os
 import time
 import logging
+import asyncio
 
 import torch
 import torch.nn.functional as F
@@ -82,6 +83,9 @@ class EmbeddingDeployment:
         self.model.to(self.device).eval()
         t_model = (time.time() - t1) * 1000
 
+        # Initialize lock for thread safety during concurrent requests
+        self._lock = asyncio.Lock()
+
         # Mark deployment as ready for serving requests
         self.ready = True
         logger.info(
@@ -93,7 +97,7 @@ class EmbeddingDeployment:
             t_model,
         )
 
-    def is_ready(self) -> bool:
+    async def is_ready(self) -> bool:
         """
         Check if the embedding service is ready to handle requests.
 
@@ -120,20 +124,19 @@ class EmbeddingDeployment:
             return f"{self.query_prefix} {text}"
         return text
 
-    def embed(self, text: str, is_query: bool = True):
+    def _embed_sync(self, text: str, is_query: bool = True):
         """
-        Generate embedding vector(s) for input text(s).
+        Synchronous embedding generation (CPU/GPU intensive).
 
-        Supports both single string and list of strings. Uses CLS token pooling
-        and L2 normalization for embedding generation.
+        This method contains the actual heavy computation and will be run
+        in a thread pool to avoid blocking the event loop.
 
         Args:
             text: Input text string or list of text strings to embed.
             is_query: Whether the text is a search query (adds prefix) or document.
 
         Returns:
-            List[float] or List[List[float]]: Single embedding vector for string input,
-                or list of embedding vectors for list input.
+            List[float] or List[List[float]]: Embedding vector(s).
         """
         # Handle both single string and list of strings
         if isinstance(text, str):
@@ -166,3 +169,35 @@ class EmbeddingDeployment:
 
         # Return single vector for single input, list of vectors for batch input
         return vecs[0] if single else vecs
+
+    async def embed(self, text: str, is_query: bool = True):
+        """
+        Generate embedding vector(s) for input text(s) (async wrapper).
+
+        Supports both single string and list of strings. Uses CLS token pooling
+        and L2 normalization for embedding generation.
+
+        This async method wraps the CPU/GPU-intensive embedding in asyncio.to_thread()
+        to prevent blocking the Ray Serve event loop. Uses lock to ensure thread safety.
+
+        Args:
+            text: Input text string or list of text strings to embed.
+            is_query: Whether the text is a search query (adds prefix) or document.
+
+        Returns:
+            List[float] or List[List[float]]: Single embedding vector for string input,
+                or list of embedding vectors for list input.
+
+        Raises:
+            RuntimeError: If the embedding service is not ready.
+            ValueError: If input text is empty.
+        """
+        if not self.ready:
+            raise RuntimeError("Embedding model not ready")
+
+        if not text or (isinstance(text, str) and not text.strip()):
+            raise ValueError("Empty query")
+
+        # Run CPU/GPU-intensive embedding in thread pool with lock for safety
+        async with self._lock:
+            return await asyncio.to_thread(self._embed_sync, text, is_query)

@@ -12,7 +12,14 @@ applications:
     route_prefix: /
     runtime_env:
       env_vars:
+        # Retrieval configuration
         RECALL_K: "100"
+        RETRIEVAL_TIMEOUT_MS: "800"
+        
+        # Embedding configuration
+        EMBEDDING_TIMEOUT_MS: "1200"
+        
+        # Reranker configuration
         RERANKER_ENABLED: "1"
         RERANKER_MODEL: "BAAI/bge-reranker-base"
         RERANKER_DEVICE: "cpu"
@@ -21,6 +28,10 @@ applications:
         RERANKER_MODE: "cross-encoder"
         RERANKER_TIMEOUT_MS: "1200"
         RERANKER_WARMUP: "1"
+        
+        # Ray/HuggingFace configuration
         RAY_SERVE_RUN_SYNC_IN_THREADPOOL: "1"
         TOKENIZERS_PARALLELISM: "false"
         HF_HOME: "/tmp/hf"
+        HF_HUB_DISABLE_TELEMETRY: "1"
+        TRANSFORMERS_CACHE: "/tmp/hf/hub"

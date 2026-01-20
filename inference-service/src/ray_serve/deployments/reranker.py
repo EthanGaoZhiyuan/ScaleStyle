@@ -10,6 +10,7 @@ import os
 import re
 import time
 import logging
+import asyncio
 from typing import List, Dict, Any
 
 from ray import serve
@@ -103,7 +104,7 @@ def _stub_score(query: str, doc: str) -> float:
     return float(overlap * length_penalty)
 
 
-@serve.deployment
+@serve.deployment(max_concurrent_queries=1)
 class RerankerDeployment:
     """
     Ray Serve deployment for reranking search results.
@@ -213,23 +214,19 @@ class RerankerDeployment:
         """
         return self._mode
 
-    def score(self, query: str, docs: List[str]) -> Dict[str, Any]:
+    def _score_sync(self, query: str, docs: List[str]) -> Dict[str, Any]:
         """
-        Score documents against a query for reranking.
+        Synchronous scoring implementation (CPU-intensive).
 
-        Computes relevance scores for each document using either CrossEncoder model
-        or stub scoring. Documents exceeding max_docs limit are scored with -1e9.
+        This method contains the actual heavy computation and will be run
+        in a thread pool to avoid blocking the event loop.
 
         Args:
             query: Search query string.
-            docs: List of document strings to score (typically metadata concatenations).
+            docs: List of document strings to score.
 
         Returns:
-            Dict[str, Any]: Dictionary containing:
-                - scores (List[float]): Relevance scores for each document
-                - rerank_ms (float): Reranking time in milliseconds
-                - mode (str): Scoring mode used ("stub" or "cross-encoder")
-                - enabled (bool): Whether reranker is enabled
+            Dict[str, Any]: Dictionary with scores and metadata.
         """
         t0 = time.perf_counter()
 
@@ -274,3 +271,27 @@ class RerankerDeployment:
             "mode": self._mode,
             "enabled": True,
         }
+
+    async def score(self, query: str, docs: List[str]) -> Dict[str, Any]:
+        """
+        Score documents against a query for reranking (async wrapper).
+
+        Computes relevance scores for each document using either CrossEncoder model
+        or stub scoring. Documents exceeding max_docs limit are scored with -1e9.
+
+        This async method wraps the CPU-intensive scoring in asyncio.to_thread()
+        to prevent blocking the Ray Serve event loop.
+
+        Args:
+            query: Search query string.
+            docs: List of document strings to score (typically metadata concatenations).
+
+        Returns:
+            Dict[str, Any]: Dictionary containing:
+                - scores (List[float]): Relevance scores for each document
+                - rerank_ms (float): Reranking time in milliseconds
+                - mode (str): Scoring mode used (\"stub\" or \"cross-encoder\")
+                - enabled (bool): Whether reranker is enabled
+        """
+        # Run CPU-intensive scoring in thread pool to avoid blocking event loop
+        return await asyncio.to_thread(self._score_sync, query, docs)

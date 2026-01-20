@@ -35,6 +35,29 @@ app = FastAPI()
 CONTRACT_FIELDS = ("title", "image_url", "dept", "desc", "price", "color")
 
 
+def _get_int_env(primary: str, legacy: str, default: int) -> int:
+    """
+    Read integer environment variable with fallback to legacy name.
+
+    Supports backward compatibility by checking both new and old variable names.
+
+    Args:
+        primary: Primary environment variable name (e.g., RERANKER_MAX_DOCS).
+        legacy: Legacy environment variable name (e.g., RERANK_MAX_DOCS).
+        default: Default value if neither variable is set.
+
+    Returns:
+        int: Parsed integer value or default.
+    """
+    v = os.getenv(primary)
+    if v is None:
+        v = os.getenv(legacy)
+    try:
+        return int(v) if v is not None else default
+    except Exception:
+        return default
+
+
 class SearchRequest(BaseModel):
     """
     Request model for search/recommendation API.
@@ -182,14 +205,17 @@ def _normalize_meta(article_id: str, raw: dict) -> dict:
         image_url = _local_image_url(article_id)
 
     # Build normalized metadata dictionary with contract-compliant fields
+    # Include both new (color/dept) and legacy (colour_group_name/department_name) for compatibility
     meta = {
         "article_id": article_id,
         "title": title,
         "image_url": image_url,
         "dept": dept,
+        "department_name": dept,  # Legacy alias
         "desc": desc,
         "price": price,
         "color": color,
+        "colour_group_name": color,  # Legacy alias
         "product_type_name": product_type,
     }
 
@@ -239,7 +265,7 @@ def _redis_client() -> redis.Redis:
     return redis.Redis(host=host, port=port, decode_responses=True)
 
 
-def _enrich_and_filter(r, candidates, filters, k, limit: Optional[int] = None):
+async def _enrich_and_filter(r, candidates, filters, k, limit: Optional[int] = None):
     """
     Enrich candidates with metadata from Redis and apply post-retrieval filters.
 
@@ -274,7 +300,8 @@ def _enrich_and_filter(r, candidates, filters, k, limit: Optional[int] = None):
     pipe = r.pipeline()
     for aid in ids:
         pipe.hgetall(f"item:{aid}")
-    metas = pipe.execute(raise_on_error=False)
+    # Make Redis execute() non-blocking with asyncio.to_thread()
+    metas = await asyncio.to_thread(pipe.execute, raise_on_error=False)
 
     # Apply filters and build enriched results
     results = []
@@ -402,7 +429,7 @@ class IngressDeployment:
         """
         # Check Redis connectivity
         try:
-            self.redis.ping()
+            await asyncio.to_thread(self.redis.ping)
         except Exception as e:
             raise HTTPException(status_code=503, detail=f"redis not ready: {e}")
 
@@ -458,9 +485,7 @@ class IngressDeployment:
 
         # Load configuration (support both RERANKER_* and RERANK_* prefixes)
         recall_k = int(os.getenv("RECALL_K", "100"))
-        enrich_limit = int(
-            os.getenv("RERANKER_MAX_DOCS") or os.getenv("RERANK_MAX_DOCS", "100")
-        )
+        enrich_limit = _get_int_env("RERANKER_MAX_DOCS", "RERANK_MAX_DOCS", 100)
         timeout_ms = int(os.getenv("RERANKER_TIMEOUT_MS", "1200"))
 
         # Unified return helper to ensure consistent contract normalization
@@ -532,12 +557,45 @@ class IngressDeployment:
             )
             return _build_response(results, route)
 
+        # P1: Base Flow Mode - support pure popularity baseline for A/B test control group
+        # When BASE_FLOW_MODE=popularity and flow=base, skip embedding/retrieval entirely
+        base_flow_mode = os.getenv("BASE_FLOW_MODE", "vector").lower()
+        if flow == "base" and base_flow_mode == "popularity":
+            # Use pure popularity baseline (no vector search)
+            results = await self.popularity_handle.topk.remote(req.k)
+            logger.info(
+                "request_id=%s intent=SEARCH flow=base mode=popularity k=%d",
+                request_id,
+                req.k,
+            )
+            return _build_response(
+                results,
+                route,
+                extra_debug={"base_flow_mode": "popularity"} if req.debug else None,
+            )
+
         # Step 3: Generate query embedding for semantic search
         embed_ms = None
+        embed_timeout_ms = int(os.getenv("EMBEDDING_TIMEOUT_MS", "1200"))
         try:
             t_embed0 = time.time()
-            vector = await self.embedding_handle.embed.remote(req.query, is_query=True)
-            embed_ms = (time.time() - t_embed0) * 1000
+            try:
+                vector = await asyncio.wait_for(
+                    self.embedding_handle.embed.remote(req.query, is_query=True),
+                    timeout=embed_timeout_ms / 1000.0,
+                )
+                embed_ms = (time.time() - t_embed0) * 1000
+            except asyncio.TimeoutError:
+                embed_ms = float(embed_timeout_ms)
+                logger.warning(
+                    "request_id=%s embed_timeout timeout_ms=%d -> fallback popularity",
+                    request_id,
+                    embed_timeout_ms,
+                )
+                results = await self.popularity_handle.topk.remote(req.k)
+                return _build_response(
+                    results, route, latency_patch={"embed": embed_ms}
+                )
         except Exception as e:
             # Fallback to popularity on embedding failure
             logger.exception(
@@ -550,23 +608,35 @@ class IngressDeployment:
 
         # Step 4: Retrieve candidates from Milvus using vector similarity
         ret_ms = None
+        retrieval_timeout_ms = int(os.getenv("RETRIEVAL_TIMEOUT_MS", "800"))
         try:
             t_ret0 = time.time()
-            # Configure retrieval and reranking limits from environment
-            recall_k = int(
-                os.getenv("RECALL_K", "100")
-            )  # Number of candidates to retrieve
-            enrich_limit = int(
-                os.getenv("RERANK_MAX_DOCS", "100")
-            )  # Max docs to rerank
+            # Use recall_k and enrich_limit already configured at function start
             candidate_k = recall_k
-            candidates = await self.retrieval_handle.search.remote(
-                vector,
-                top_k=req.k,
-                candidate_k=candidate_k,
-                filters=filters,
-            )
-            ret_ms = (time.time() - t_ret0) * 1000
+            try:
+                candidates = await asyncio.wait_for(
+                    self.retrieval_handle.search.remote(
+                        vector,
+                        top_k=req.k,
+                        candidate_k=candidate_k,
+                        filters=filters,
+                    ),
+                    timeout=retrieval_timeout_ms / 1000.0,
+                )
+                ret_ms = (time.time() - t_ret0) * 1000
+            except asyncio.TimeoutError:
+                ret_ms = float(retrieval_timeout_ms)
+                logger.warning(
+                    "request_id=%s retrieval_timeout timeout_ms=%d -> fallback popularity",
+                    request_id,
+                    retrieval_timeout_ms,
+                )
+                results = await self.popularity_handle.topk.remote(req.k)
+                return _build_response(
+                    results,
+                    route,
+                    latency_patch={"embed": embed_ms, "retrieve": ret_ms},
+                )
         except Exception as e:
             # Fallback to popularity on retrieval failure
             logger.exception(
@@ -586,10 +656,9 @@ class IngressDeployment:
 
         try:
             t_enrich0 = time.time()
-            # Limit enrichment to top N candidates to control reranking cost
-            enrich_limit = int(os.getenv("RERANK_MAX_DOCS", "100"))
-            # Filter and enrich candidates with metadata
-            results = _enrich_and_filter(
+            # Limit enrichment to top N candidates to control reranking cost (use value from function start)
+            # Filter and enrich candidates with metadata (async to avoid blocking)
+            results = await _enrich_and_filter(
                 self.redis, candidates, filters, req.k, limit=enrich_limit
             )
             enrich_ms = (time.time() - t_enrich0) * 1000
@@ -681,13 +750,14 @@ class IngressDeployment:
         )
 
         # Log request metrics for monitoring and analysis
+        total_ms = resp.get("latency_ms", {}).get("total")
         logger.info(
             "request_id=%s intent=SEARCH k=%d embed_ms=%.2f ret_ms=%.2f total_ms=%.2f filters=%s",
             request_id,
             req.k,
             embed_ms or -1,
             ret_ms or -1,
-            enrich_ms or -1,
+            total_ms or -1,
             json.dumps(filters, ensure_ascii=False),
         )
         return resp
