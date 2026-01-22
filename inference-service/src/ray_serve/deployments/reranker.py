@@ -179,7 +179,9 @@ class RerankerDeployment:
         try:
             self._model = CrossEncoder(self.model_name, device=self.device)
             self._mode = "cross-encoder"
-            logger.info(f"Reranker using model: {self.model_name} on device: {self.device}")
+            logger.info(
+                f"Reranker using model: {self.model_name} on device: {self.device}"
+            )
         except Exception as e:
             logger.error(
                 f"Failed to load model {self.model_name}. Falling back to stub model. Error: {e}"

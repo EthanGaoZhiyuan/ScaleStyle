@@ -677,7 +677,6 @@ class IngressDeployment:
 
                         # Capture order before reranking for comparison
                         before_ids = [r.get("article_id") for r in results]
-                        before_scores = [r.get("score") for r in results]
 
                         try:
                             info = await asyncio.wait_for(
@@ -712,23 +711,26 @@ class IngressDeployment:
 
                             # Capture order after reranking
                             after_ids = [r.get("article_id") for r in results]
-                            
+
                             # Calculate rerank effect
                             top_k_compare = min(len(before_ids), len(after_ids), req.k)
                             changed_positions = sum(
-                                1 for i in range(top_k_compare) 
+                                1
+                                for i in range(top_k_compare)
                                 if before_ids[i] != after_ids[i]
                             )
                             top1_changed = (
-                                before_ids[0] != after_ids[0] if before_ids and after_ids else False
+                                before_ids[0] != after_ids[0]
+                                if before_ids and after_ids
+                                else False
                             )
-                            
+
                             rerank_effect = {
                                 "changed_positions": changed_positions,
                                 "top1_changed": top1_changed,
-                                "total_compared": top_k_compare
+                                "total_compared": top_k_compare,
                             }
-                            
+
                             # Log rerank changes for debugging and milestone verification
                             if req.debug:
                                 logger.info(
@@ -791,7 +793,7 @@ class IngressDeployment:
             if rerank_debug is None:
                 rerank_debug = {}
             rerank_debug["effect"] = rerank_effect
-            
+
         resp = _build_response(
             results,
             route,

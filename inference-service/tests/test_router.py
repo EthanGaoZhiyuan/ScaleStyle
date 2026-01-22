@@ -10,7 +10,7 @@ async def test_route_browse_intent():
     """
     r = RouterDeployment()
     out = await r.route("what's trending?")
-    
+
     assert out["intent"] == "BROWSE"
     assert "filters" in out
     print(" BROWSE intent recognition successful")
@@ -24,7 +24,7 @@ async def test_route_search_with_filters():
     """
     r = RouterDeployment()
     out = await r.route("red dress under 50")
-    
+
     assert out["intent"] == "SEARCH"
     filters = out.get("filters", {})
     # Should extract some filter conditions
@@ -39,10 +39,10 @@ async def test_route_special_chars():
     Boundary condition: emoji, quotes, special spaces
     """
     r = RouterDeployment()
-    
+
     # Contains emoji, quotes, extra spaces
     out = await r.route('  "red" dress under $50  ')
-    
+
     assert out["intent"] in ("SEARCH", "BROWSE")
     assert "filters" in out
     # Success if no exception is thrown
@@ -56,10 +56,10 @@ async def test_route_empty_query():
     Boundary condition: Empty string or only spaces
     """
     r = RouterDeployment()
-    
+
     # Empty query should have default behavior
     out = await r.route("   ")
-    
+
     assert "intent" in out
     assert "filters" in out
     print(" Empty query handling successful")
