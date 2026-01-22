@@ -26,36 +26,15 @@ from src.ray_serve.deployments.embedding import EmbeddingDeployment
 from src.ray_serve.deployments.retrieval import RetrievalDeployment
 from src.ray_serve.deployments.popularity import PopularityDeployment
 from src.ray_serve.deployments.reranker import RerankerDeployment
+from src.config import RetrievalConfig, EmbeddingConfig, RerankerConfig, ABTestConfig
 
 logger = logging.getLogger("scalestyle.ingress")
 # FastAPI application for HTTP endpoints
 app = FastAPI()
 
 # Required fields that must be present in every result item for API contract compliance
+# Required fields that must be present in every result item for API contract compliance
 CONTRACT_FIELDS = ("title", "image_url", "dept", "desc", "price", "color")
-
-
-def _get_int_env(primary: str, legacy: str, default: int) -> int:
-    """
-    Read integer environment variable with fallback to legacy name.
-
-    Supports backward compatibility by checking both new and old variable names.
-
-    Args:
-        primary: Primary environment variable name (e.g., RERANKER_MAX_DOCS).
-        legacy: Legacy environment variable name (e.g., RERANK_MAX_DOCS).
-        default: Default value if neither variable is set.
-
-    Returns:
-        int: Parsed integer value or default.
-    """
-    v = os.getenv(primary)
-    if v is None:
-        v = os.getenv(legacy)
-    try:
-        return int(v) if v is not None else default
-    except Exception:
-        return default
 
 
 class SearchRequest(BaseModel):
@@ -483,10 +462,10 @@ class IngressDeployment:
         request_id = str(uuid.uuid4())
         t0 = time.time()
 
-        # Load configuration (support both RERANKER_* and RERANK_* prefixes)
-        recall_k = int(os.getenv("RECALL_K", "100"))
-        enrich_limit = _get_int_env("RERANKER_MAX_DOCS", "RERANK_MAX_DOCS", 100)
-        timeout_ms = int(os.getenv("RERANKER_TIMEOUT_MS", "1200"))
+        # Load configuration from centralized config
+        recall_k = RetrievalConfig.RECALL_K
+        enrich_limit = RerankerConfig.MAX_DOCS
+        timeout_ms = RerankerConfig.TIMEOUT_MS
 
         # Unified return helper to ensure consistent contract normalization
         def _build_response(results, route, latency_patch=None, extra_debug=None):
@@ -513,7 +492,7 @@ class IngressDeployment:
                     "flow": route.get("flow", "smart"),
                     "recall_k": recall_k,
                     "rerank_max_docs": enrich_limit,
-                    "rerank_enabled": (os.getenv("RERANKER_ENABLED", "1") == "1")
+                    "rerank_enabled": RerankerConfig.ENABLED
                     and (route.get("flow") == "smart"),
                 }
 
@@ -542,9 +521,7 @@ class IngressDeployment:
         route["flow"] = flow
 
         # Enable reranking only if globally enabled AND user is in "smart" flow
-        enable_rerank = (os.getenv("RERANKER_ENABLED", "1") == "1") and (
-            flow == "smart"
-        )
+        enable_rerank = RerankerConfig.ENABLED and (flow == "smart")
 
         # Step 2: Handle BROWSE intent - return popular items directly
         if intent == "BROWSE":
@@ -559,7 +536,7 @@ class IngressDeployment:
 
         # P1: Base Flow Mode - support pure popularity baseline for A/B test control group
         # When BASE_FLOW_MODE=popularity and flow=base, skip embedding/retrieval entirely
-        base_flow_mode = os.getenv("BASE_FLOW_MODE", "vector").lower()
+        base_flow_mode = ABTestConfig.BASE_FLOW_MODE
         if flow == "base" and base_flow_mode == "popularity":
             # Use pure popularity baseline (no vector search)
             results = await self.popularity_handle.topk.remote(req.k)
@@ -576,7 +553,7 @@ class IngressDeployment:
 
         # Step 3: Generate query embedding for semantic search
         embed_ms = None
-        embed_timeout_ms = int(os.getenv("EMBEDDING_TIMEOUT_MS", "1200"))
+        embed_timeout_ms = EmbeddingConfig.TIMEOUT_MS
         try:
             t_embed0 = time.time()
             try:
@@ -608,7 +585,7 @@ class IngressDeployment:
 
         # Step 4: Retrieve candidates from Milvus using vector similarity
         ret_ms = None
-        retrieval_timeout_ms = int(os.getenv("RETRIEVAL_TIMEOUT_MS", "800"))
+        retrieval_timeout_ms = RetrievalConfig.TIMEOUT_MS
         try:
             t_ret0 = time.time()
             # Use recall_k and enrich_limit already configured at function start

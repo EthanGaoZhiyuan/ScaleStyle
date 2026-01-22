@@ -12,12 +12,27 @@ applications:
     route_prefix: /
     runtime_env:
       env_vars:
+        # Redis configuration
+        REDIS_HOST: "localhost"
+        REDIS_PORT: "6379"
+        POPULARITY_KEY: "global:popular"
+        
+        # Milvus configuration
+        MILVUS_HOST: "localhost"
+        MILVUS_PORT: "19530"
+        MILVUS_COLLECTION: "scale_style_bge_v2"
+        
+        # Embedding configuration
+        EMBEDDING_MODEL: "BAAI/bge-large-en-v1.5"
+        EMBEDDING_MAX_LEN: "512"
+        EMBEDDING_NUM_CPUS: "2"
+        EMBEDDING_NUM_GPUS: "0"
+        EMBEDDING_QUERY_PREFIX: "Represent this sentence for searching relevant passages:"
+        EMBEDDING_TIMEOUT_MS: "1200"
+        
         # Retrieval configuration
         RECALL_K: "100"
         RETRIEVAL_TIMEOUT_MS: "800"
-        
-        # Embedding configuration
-        EMBEDDING_TIMEOUT_MS: "1200"
         
         # Reranker configuration
         RERANKER_ENABLED: "1"
@@ -28,6 +43,9 @@ applications:
         RERANKER_MODE: "cross-encoder"
         RERANKER_TIMEOUT_MS: "1200"
         RERANKER_WARMUP: "1"
+        
+        # A/B testing configuration
+        BASE_FLOW_MODE: "vector"  # Options: vector, popularity
         
         # Ray/HuggingFace configuration
         RAY_SERVE_RUN_SYNC_IN_THREADPOOL: "1"

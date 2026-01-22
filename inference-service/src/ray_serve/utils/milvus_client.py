@@ -1,13 +1,14 @@
-import os
 from pymilvus import connections
 import time
+
+from src.config import MilvusConfig
 
 
 class MilvusClient:
     @staticmethod
     def ensure_connection(alias="default"):
-        host = os.getenv("MILVUS_HOST", "localhost")
-        port = os.getenv("MILVUS_PORT", "19530")
+        host = MilvusConfig.HOST
+        port = MilvusConfig.PORT
 
         # ckeck connection
         if connections.has_connection(alias):

@@ -4,6 +4,8 @@ import sys
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
+from config import TOP_ITEMS_PARQUET_PATH, TRAIN_DATA_PARQUET_PATH
+
 # Set Java options to allow security manager
 os.environ["JDK_JAVA_OPTIONS"] = "-Djava.security.manager=allow"
 
@@ -19,11 +21,8 @@ def generate_top_items():
         .getOrCreate()
     )
 
-    # Determine the base directory
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-
-    input_path = os.path.join(base_dir, "../data/processed/train_data_parquet")
-    output_path = os.path.join(base_dir, "../data/processed/top_items_parquet")
+    input_path = TRAIN_DATA_PARQUET_PATH
+    output_path = TOP_ITEMS_PARQUET_PATH
 
     if not os.path.exists(input_path):
         print(f"Input path {input_path} does not exist.", file=sys.stderr)

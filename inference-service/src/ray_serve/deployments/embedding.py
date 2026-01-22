@@ -1,4 +1,3 @@
-import os
 import time
 import logging
 import asyncio
@@ -8,33 +7,15 @@ import torch.nn.functional as F
 from transformers import AutoModel, AutoTokenizer
 from ray import serve
 
+from src.config import EmbeddingConfig
+
 logger = logging.getLogger("scalestyle.embedding")
-
-
-def _env_int(name: str, default: int) -> int:
-    """
-    Read an integer value from environment variable with fallback to default.
-
-    Args:
-        name: Environment variable name to read.
-        default: Default value if variable is not set or invalid.
-
-    Returns:
-        int: The parsed integer value or default.
-    """
-    v = os.getenv(name)
-    if v is None:
-        return default
-    try:
-        return int(v)
-    except Exception:
-        return default
 
 
 @serve.deployment(
     ray_actor_options={
-        "num_cpus": _env_int("EMBEDDING_NUM_CPUS", 2),
-        "num_gpus": float(os.getenv("EMBEDDING_NUM_GPUS", "0")),
+        "num_cpus": EmbeddingConfig.NUM_CPUS,
+        "num_gpus": EmbeddingConfig.NUM_GPUS,
     },
     autoscaling_config=None,
 )
@@ -59,14 +40,11 @@ class EmbeddingDeployment:
 
         # Determine device: use GPU if available, otherwise CPU
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        # Load model configuration from environment
-        self.model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-en-v1.5")
-        self.max_length = int(os.getenv("EMBEDDING_MAX_LEN", "512"))
+        # Load model configuration from centralized config
+        self.model_name = EmbeddingConfig.MODEL
+        self.max_length = EmbeddingConfig.MAX_LENGTH
         # Query prefix for asymmetric embedding (different for queries vs documents)
-        self.query_prefix = os.getenv(
-            "EMBEDDING_QUERY_PREFIX",
-            "Represent this sentence for searching relevant passages:",
-        ).strip()
+        self.query_prefix = EmbeddingConfig.QUERY_PREFIX.strip()
 
         # Set data type: float16 for GPU (faster), float32 for CPU (more stable)
         self.dtype = torch.float16 if self.device == "cuda" else torch.float32

@@ -1,10 +1,12 @@
 import logging
 import asyncio
-from ray import serve
-from pymilvus import MilvusClient
-import os
 import time
 from typing import List, Dict, Any, Optional
+
+from ray import serve
+from pymilvus import MilvusClient
+
+from src.config import MilvusConfig
 
 logger = logging.getLogger("scalestyle.retrieval")
 
@@ -28,10 +30,10 @@ class RetrievalDeployment:
         # Initialize ready state to False until Milvus is fully loaded
         self.ready = False
 
-        # Load Milvus connection parameters from environment variables
-        self.milvus_host = os.getenv("MILVUS_HOST", "localhost")
-        self.milvus_port = os.getenv("MILVUS_PORT", "19530")
-        self.collection_name = os.getenv("MILVUS_COLLECTION", "scale_style_bge_v2")
+        # Load Milvus connection parameters from centralized config
+        self.milvus_host = MilvusConfig.HOST
+        self.milvus_port = MilvusConfig.PORT
+        self.collection_name = MilvusConfig.COLLECTION
 
         # Connect to Milvus
         uri = f"http://{self.milvus_host}:{self.milvus_port}"

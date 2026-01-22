@@ -1,5 +1,5 @@
-import os
 import redis
+from src.config import RedisConfig
 
 
 class RedisClient:
@@ -9,8 +9,10 @@ class RedisClient:
     @classmethod
     def get_client(cls):
         if cls._client is None:
-            host = os.getenv("REDIS_HOST", "localhost")
-            port = int(os.getenv("REDIS_PORT", 6379))
-            print(f"[RedisClient] Connecting to Redis at {host}:{port}...")
-            cls._client = redis.Redis(host=host, port=port, decode_responses=True)
+            print(
+                f"[RedisClient] Connecting to Redis at {RedisConfig.HOST}:{RedisConfig.PORT}..."
+            )
+            cls._client = redis.Redis(
+                host=RedisConfig.HOST, port=RedisConfig.PORT, decode_responses=True
+            )
         return cls._client

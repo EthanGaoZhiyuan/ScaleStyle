@@ -4,14 +4,19 @@ import random
 
 import pandas as pd
 
+from config import (
+    ARTICLES_CSV_PATH,
+    IMAGE_URL_TEMPLATE,
+    MAX_PRICE,
+    MIN_PRICE,
+    PRODUCT_METADATA_JSON_PATH,
+)
+
 
 def export_metadata():
-    # Determine the base directory
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-    # Define input and output paths
-    input_path = os.path.join(base_dir, "data/raw/articles.csv")
-    output_path = os.path.join(base_dir, "data/processed/product_metadata.json")
+    # Use configured paths
+    input_path = ARTICLES_CSV_PATH
+    output_path = PRODUCT_METADATA_JSON_PATH
 
     # Check if input file exists
     if not os.path.exists(input_path):
@@ -34,7 +39,7 @@ def export_metadata():
     metadata_map = {}
 
     def get_mock_price():
-        return round(random.uniform(19.99, 99.99), 2)
+        return round(random.uniform(MIN_PRICE, MAX_PRICE), 2)
 
     # Populate metadata map
     for _, row in df.iterrows():
@@ -44,10 +49,7 @@ def export_metadata():
         # Construct image URL
         # Rule: Use first three digits of article_id for folder structure
         folder = article_id[:3]
-        img_url = (
-            f"https://lp2.hm.com/hmgoepprod?set=source[/{folder}/{article_id}.jpg],"
-            "origin[dam],category[],type[LOOKBOOK],res[m],hmver[1]&call=url[file:/product/main]"
-        )
+        img_url = IMAGE_URL_TEMPLATE.format(folder=folder, article_id=article_id)
 
         metadata_map[article_id] = {
             "itemId": article_id,

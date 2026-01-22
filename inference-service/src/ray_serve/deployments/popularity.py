@@ -1,22 +1,23 @@
-import os
 import redis
 import asyncio
 from ray import serve
 from typing import Any, Dict, List
+
+from src.config import RedisConfig
 
 
 def _redis_client() -> redis.Redis:
     """
     Create and return a Redis client connection.
 
-    Reads connection parameters from environment variables with fallback defaults.
+    Reads connection parameters from centralized config.
 
     Returns:
         redis.Redis: Configured Redis client with string decoding enabled.
     """
-    host = os.getenv("REDIS_HOST", "localhost")
-    port = int(os.getenv("REDIS_PORT", "6379"))
-    return redis.Redis(host=host, port=port, decode_responses=True)
+    return redis.Redis(
+        host=RedisConfig.HOST, port=RedisConfig.PORT, decode_responses=True
+    )
 
 
 @serve.deployment
@@ -39,7 +40,7 @@ class PopularityDeployment:
         # Establish Redis connection for accessing popularity data
         self.redis = _redis_client()
         # Configure the Redis key for the global popularity list
-        self.key = os.getenv("POPULARITY_KEY", "global:popular")
+        self.key = RedisConfig.POPULARITY_KEY
 
     async def topk(self, k: int) -> List[Dict[str, Any]]:
         """

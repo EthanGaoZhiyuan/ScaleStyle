@@ -5,24 +5,16 @@ import redis
 from pymilvus import MilvusClient
 from tqdm import tqdm
 
-# --- Configuration ---
-DATA_PATH = os.getenv(
-    "DATA_PATH", "data-pipeline/data/article_embeddings_bge_detail.parquet"
+from config import (
+    ARTICLE_EMBEDDINGS_PATH,
+    MILVUS_COLLECTION,
+    MILVUS_HOST,
+    MILVUS_PORT,
+    POPULARITY_KEY,
+    POPULARITY_TOPN,
+    REDIS_HOST,
+    REDIS_PORT,
 )
-
-MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
-MILVUS_PORT = os.getenv("MILVUS_PORT", "19530")
-MILVUS_COLLECTION = os.getenv("MILVUS_COLLECTION", "scale_style_bge_v2")
-
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-
-# This loader assumes embeddings are already computed and stored in parquet column "embedding"
-# embedding dim must match the collection dim
-EMBEDDING_COL = os.getenv("EMBEDDING_COL", "embedding")
-
-POPULARITY_KEY = os.getenv("POPULARITY_KEY", "global:popular")
-POPULARITY_TOPN = int(os.getenv("POPULARITY_TOPN", "200"))
 
 
 def redis_client() -> redis.Redis:
@@ -30,8 +22,10 @@ def redis_client() -> redis.Redis:
 
 
 def main():
-    assert os.path.exists(DATA_PATH), f"DATA_PATH not found: {DATA_PATH}"
-    df = pd.read_parquet(DATA_PATH)
+    assert os.path.exists(
+        ARTICLE_EMBEDDINGS_PATH
+    ), f"DATA_PATH not found: {ARTICLE_EMBEDDINGS_PATH}"
+    df = pd.read_parquet(ARTICLE_EMBEDDINGS_PATH)
     total_rows = len(df)
     print(f"[loader] loaded rows={total_rows} cols={df.columns.tolist()}")
 
