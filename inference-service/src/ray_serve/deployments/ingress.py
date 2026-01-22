@@ -653,6 +653,7 @@ class IngressDeployment:
         enrich_ms = None
         rerank_ms = None
         rerank_mode = None
+        rerank_effect = None  # Initialize rerank_effect
 
         try:
             t_enrich0 = time.time()
@@ -668,10 +669,15 @@ class IngressDeployment:
                 results = await self.popularity_handle.topk.remote(req.k)
             else:
                 # Step 6: Rerank results for improved semantic relevance (if enabled for user's flow)
+                rerank_effect = None
                 if enable_rerank:
                     try:
                         docs = [_build_rerank_doc(r.get("meta", {})) for r in results]
                         t_rr0 = time.time()
+
+                        # Capture order before reranking for comparison
+                        before_ids = [r.get("article_id") for r in results]
+                        before_scores = [r.get("score") for r in results]
 
                         try:
                             info = await asyncio.wait_for(
@@ -703,6 +709,49 @@ class IngressDeployment:
                             results.sort(
                                 key=lambda x: x.get("rerank_score", -1e9), reverse=True
                             )
+
+                            # Capture order after reranking
+                            after_ids = [r.get("article_id") for r in results]
+                            
+                            # Calculate rerank effect
+                            top_k_compare = min(len(before_ids), len(after_ids), req.k)
+                            changed_positions = sum(
+                                1 for i in range(top_k_compare) 
+                                if before_ids[i] != after_ids[i]
+                            )
+                            top1_changed = (
+                                before_ids[0] != after_ids[0] if before_ids and after_ids else False
+                            )
+                            
+                            rerank_effect = {
+                                "changed_positions": changed_positions,
+                                "top1_changed": top1_changed,
+                                "total_compared": top_k_compare
+                            }
+                            
+                            # Log rerank changes for debugging and milestone verification
+                            if req.debug:
+                                logger.info(
+                                    "request_id=%s RERANK_EFFECT: changed=%d/%d top1_changed=%s "
+                                    "before_top5=%s after_top5=%s",
+                                    request_id,
+                                    changed_positions,
+                                    top_k_compare,
+                                    top1_changed,
+                                    before_ids[:5],
+                                    after_ids[:5],
+                                )
+                                # Detailed score comparison for top 3
+                                for i in range(min(3, len(before_ids))):
+                                    logger.info(
+                                        "request_id=%s RERANK_DETAIL rank=%d: "
+                                        "article_id=%s vector_score=%.4f rerank_score=%.4f",
+                                        request_id,
+                                        i + 1,
+                                        after_ids[i],
+                                        results[i].get("score", 0),
+                                        results[i].get("rerank_score", 0),
+                                    )
 
                     except Exception as e:
                         logger.exception(
@@ -737,6 +786,12 @@ class IngressDeployment:
             )
 
         # Build final response using unified helper (P0-1: ensures contract_dbg is always defined)
+        rerank_debug = {"mode": rerank_mode} if rerank_mode else None
+        if rerank_effect:
+            if rerank_debug is None:
+                rerank_debug = {}
+            rerank_debug["effect"] = rerank_effect
+            
         resp = _build_response(
             results,
             route,
@@ -746,7 +801,7 @@ class IngressDeployment:
                 "enrich": enrich_ms,
                 "rerank": rerank_ms,
             },
-            extra_debug={"rerank": {"mode": rerank_mode}} if rerank_mode else None,
+            extra_debug={"rerank": rerank_debug} if rerank_debug else None,
         )
 
         # Log request metrics for monitoring and analysis

@@ -104,7 +104,7 @@ def _stub_score(query: str, doc: str) -> float:
     return float(overlap * length_penalty)
 
 
-@serve.deployment(max_concurrent_queries=1)
+@serve.deployment(max_ongoing_requests=1)
 class RerankerDeployment:
     """
     Ray Serve deployment for reranking search results.
@@ -177,9 +177,9 @@ class RerankerDeployment:
 
         # Attempt to load the specified CrossEncoder model
         try:
-            self._model = CrossEncoder(self.model_name)
+            self._model = CrossEncoder(self.model_name, device=self.device)
             self._mode = "cross-encoder"
-            logger.info(f"Reranker using model: {self.model_name}")
+            logger.info(f"Reranker using model: {self.model_name} on device: {self.device}")
         except Exception as e:
             logger.error(
                 f"Failed to load model {self.model_name}. Falling back to stub model. Error: {e}"
