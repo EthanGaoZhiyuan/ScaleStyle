@@ -5,8 +5,9 @@ import pytest
 # Import the module first, then get the decorated class
 def get_router_class():
     from src.ray_serve.deployments.router import RouterDeployment
+
     # RouterDeployment is a Deployment object, get the underlying class
-    if hasattr(RouterDeployment, 'func_or_class'):
+    if hasattr(RouterDeployment, "func_or_class"):
         return RouterDeployment.func_or_class
     # Fallback: it might already be the class in some environments
     return RouterDeployment

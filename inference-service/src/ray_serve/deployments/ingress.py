@@ -133,9 +133,7 @@ def _contract_normalize(results: list, limit: int):
             "desc": desc,
             "price": price,
             "color": color,
-            "reason": str(
-                raw.get("reason") or ""
-            ),
+            "reason": str(raw.get("reason") or ""),
         }
 
         # count missing fields
@@ -478,7 +476,7 @@ class IngressDeployment:
         recall_k = RetrievalConfig.RECALL_K
         enrich_limit = RerankerConfig.MAX_DOCS
         timeout_ms = RerankerConfig.TIMEOUT_MS
-        
+
         # P0-1 Fix: Track contract_dbg for post-generation correction
         contract_dbg_cache = {}
 
@@ -487,7 +485,7 @@ class IngressDeployment:
             """Helper to build response with contract normalization for all branches."""
             # Always normalize results for contract compliance (fix: no redis parameter needed)
             results, contract_dbg = _contract_normalize(results, limit=req.k)
-            
+
             # P0-1 Fix: Cache contract_dbg for potential correction after generation
             contract_dbg_cache.clear()
             contract_dbg_cache.update(contract_dbg)
@@ -795,13 +793,17 @@ class IngressDeployment:
                         generation_ms = (time.time() - t_gen0) * 1000
                         reason_value = out.get("reason", "")
                         results[0].setdefault("meta", {})["reason"] = reason_value
-                        
+
                         # P0-1 Fix: Correct contract_dbg if reason was generated
                         if reason_value and contract_dbg_cache:
-                            missing_by_field = contract_dbg_cache.get("missing_by_field", {})
+                            missing_by_field = contract_dbg_cache.get(
+                                "missing_by_field", {}
+                            )
                             if missing_by_field.get("reason", 0) > 0:
                                 missing_by_field["reason"] = 0
-                                contract_dbg_cache["missing_total"] = sum(missing_by_field.values())
+                                contract_dbg_cache["missing_total"] = sum(
+                                    missing_by_field.values()
+                                )
 
                         logger.info(
                             "request_id=%s generation_success gen_ms=%.2f mode=%s model=%s",

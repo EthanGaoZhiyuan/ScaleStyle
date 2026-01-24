@@ -88,16 +88,16 @@ class GenerationDeployment:
         """
         from src.config import GenerationConfig
         import asyncio
-        
+
         # ---- Read config ----
         self.enabled = GenerationConfig.ENABLED
         self.mode = GenerationConfig.MODE
-        
+
         # P0-2 Fix: Concurrency protection (prevent OOM under load)
         max_concurrency = int(os.getenv("GENERATION_MAX_CONCURRENCY", "1"))
         self._semaphore = asyncio.Semaphore(max_concurrency)
         logger.info(f"Generation concurrency limit: {max_concurrency}")
-        
+
         # ---- Early exit if disabled ----
         if not self.enabled:
             logger.info("Generation disabled (GENERATION_ENABLED=0); skip model load.")
@@ -106,7 +106,7 @@ class GenerationDeployment:
             self.tokenizer = None
             self.model = None
             return
-        
+
         # ---- Early exit if template mode ----
         if self.mode == "template":
             logger.info("Generation mode=template; skip model load.")
@@ -115,7 +115,7 @@ class GenerationDeployment:
             self.tokenizer = None
             self.model = None
             return
-        
+
         # ---- cache dir (防重复下载) ----
         hf_home = os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
         os.environ.setdefault("HF_HOME", hf_home)
@@ -258,11 +258,11 @@ class GenerationDeployment:
     def _template_reason(self, q: str, item: Dict[str, Any]) -> str:
         """
         Generate a template-based recommendation reason (lightweight, no model).
-        
+
         Args:
             q: User query string
             item: Item metadata dictionary
-            
+
         Returns:
             str: Template-based reason
         """
@@ -270,14 +270,14 @@ class GenerationDeployment:
         title = (meta.get("title") or meta.get("prod_name") or "this item").strip()
         color = (meta.get("color") or "").strip()
         price = meta.get("price")
-        
+
         parts = [f"Recommended because it matches '{q}'."]
         if color:
             parts.append(f"Color: {color}.")
         if price not in (None, "", 0):
             parts.append(f"Price: {price}.")
         parts.append(f"Item: {title}.")
-        
+
         return " ".join(parts)[:220]
 
     async def explain(self, q: str, item: Dict[str, Any]) -> Dict[str, Any]:
@@ -297,9 +297,9 @@ class GenerationDeployment:
                 - device: Device used (if llm mode)
         """
         import asyncio
-        
+
         t0 = time.time()
-        
+
         # P0-1 Fix: Early return if disabled
         if not self.enabled:
             return {
@@ -307,7 +307,7 @@ class GenerationDeployment:
                 "gen_ms": (time.time() - t0) * 1000,
                 "mode": "disabled",
             }
-        
+
         # P0-2 Fix: Concurrency protection - limit concurrent generations
         async with self._semaphore:
             # P0-1 Fix: Template mode - lightweight reason
@@ -327,7 +327,7 @@ class GenerationDeployment:
                         "mode": "template",
                         "error": str(e),
                     }
-            
+
             # P0-1 Fix: LLM mode - heavy inference
             try:
                 prompt = self._build_prompt(q, item)

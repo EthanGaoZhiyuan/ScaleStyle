@@ -1,4 +1,4 @@
-"""  
+"""
 Tests for the generation deployment.
 
 This module contains tests for the recommendation explanation generation functionality.
@@ -12,7 +12,6 @@ import pytest
 import asyncio
 import os
 from src.ray_serve.deployments.generation import GenerationDeployment
-
 
 # Skip all tests in this module by default (require model download)
 pytestmark = pytest.mark.skipif(
