@@ -7,7 +7,7 @@ def test_contract_normalize_stable_fields():
 
     # Input data missing many fields
     raw = [
-        {"article_id": "1", "meta": {"price": "0.1", "colour_group_name": "Red"}},
+        {"article_id": "1", "meta": {"price": "0.1", "color": "Red"}},
         {"article_id": "2", "meta": {"detail_desc": "hello"}},
     ]
 

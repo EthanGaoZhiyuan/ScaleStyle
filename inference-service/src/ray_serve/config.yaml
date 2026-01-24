@@ -47,9 +47,22 @@ applications:
         # A/B testing configuration
         BASE_FLOW_MODE: "vector"  # Options: vector, popularity
         
+        # Generation configuration
+        GENERATION_ENABLED: "0"  # Default off until model is loaded
+        GENERATION_TIMEOUT_MS: "600"
+        GENERATION_FLOW: "smart"  # Options: smart (only SEARCH), all (always)
+        GENERATION_MODEL: "Qwen/Qwen2-1.5B-Instruct"
+        GENERATION_DEVICE: "auto"  # auto, cpu, cuda, mps
+        GENERATION_MAX_NEW_TOKENS: "48"
+        GENERATION_TEMPERATURE: "0.2"
+        GENERATION_TOP_P: "0.9"
+        GENERATION_DO_SAMPLE: "0"
+        GENERATION_DTYPE: "float16"
+        GENERATION_WARMUP: "1"
+        
         # Ray/HuggingFace configuration
         RAY_SERVE_RUN_SYNC_IN_THREADPOOL: "1"
         TOKENIZERS_PARALLELISM: "false"
-        HF_HOME: "/tmp/hf"
+        HF_HOME: "/tmp/hf"  # Model cache directory
         HF_HUB_DISABLE_TELEMETRY: "1"
-        TRANSFORMERS_CACHE: "/tmp/hf/hub"
+        TRANSFORMERS_CACHE: "/tmp/hf/transformers"

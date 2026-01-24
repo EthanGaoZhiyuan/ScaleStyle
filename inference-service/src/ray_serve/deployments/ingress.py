@@ -26,7 +26,13 @@ from src.ray_serve.deployments.embedding import EmbeddingDeployment
 from src.ray_serve.deployments.retrieval import RetrievalDeployment
 from src.ray_serve.deployments.popularity import PopularityDeployment
 from src.ray_serve.deployments.reranker import RerankerDeployment
-from src.config import RetrievalConfig, EmbeddingConfig, RerankerConfig, ABTestConfig
+from src.ray_serve.deployments.generation import GenerationDeployment
+from src.config import (
+    RetrievalConfig,
+    EmbeddingConfig,
+    RerankerConfig,
+    ABTestConfig,
+)
 
 logger = logging.getLogger("scalestyle.ingress")
 # FastAPI application for HTTP endpoints
@@ -127,6 +133,9 @@ def _contract_normalize(results: list, limit: int):
             "desc": desc,
             "price": price,
             "color": color,
+            "reason": str(
+                raw.get("reason") or ""
+            ),
         }
 
         # count missing fields
@@ -361,6 +370,7 @@ class IngressDeployment:
         retrieval_handle: DeploymentHandle,
         popularity_handle: DeploymentHandle,
         reranker_handle: DeploymentHandle,
+        generation_handle: DeploymentHandle,
     ):
         """
         Initialize the ingress deployment with handles to other deployments.
@@ -371,6 +381,7 @@ class IngressDeployment:
             retrieval_handle: Handle to retrieval deployment for vector search.
             popularity_handle: Handle to popularity deployment for fallback recommendations.
             reranker_handle: Handle to reranker deployment for result reordering.
+            generation_handle: Handle to generation deployment for recommendation explanations.
         """
         # Store handles to downstream deployments
         self.router_handle = router_handle
@@ -378,6 +389,7 @@ class IngressDeployment:
         self.retrieval_handle = retrieval_handle
         self.popularity_handle = popularity_handle
         self.reranker_handle = reranker_handle
+        self.generation_handle = generation_handle
 
         # Initialize Redis client for metadata access
         self.redis = _redis_client()
@@ -466,12 +478,19 @@ class IngressDeployment:
         recall_k = RetrievalConfig.RECALL_K
         enrich_limit = RerankerConfig.MAX_DOCS
         timeout_ms = RerankerConfig.TIMEOUT_MS
+        
+        # P0-1 Fix: Track contract_dbg for post-generation correction
+        contract_dbg_cache = {}
 
         # Unified return helper to ensure consistent contract normalization
         def _build_response(results, route, latency_patch=None, extra_debug=None):
             """Helper to build response with contract normalization for all branches."""
             # Always normalize results for contract compliance (fix: no redis parameter needed)
             results, contract_dbg = _contract_normalize(results, limit=req.k)
+            
+            # P0-1 Fix: Cache contract_dbg for potential correction after generation
+            contract_dbg_cache.clear()
+            contract_dbg_cache.update(contract_dbg)
 
             total_ms = (time.time() - t0) * 1000
             resp = {
@@ -642,6 +661,9 @@ class IngressDeployment:
             enrich_ms = (time.time() - t_enrich0) * 1000
 
             # Fallback to popularity if all candidates filtered out
+            # P0-4 Fix: 初始化generation_ms避免fallback路径未定义
+            generation_ms = None
+
             if not results:
                 results = await self.popularity_handle.topk.remote(req.k)
             else:
@@ -744,6 +766,68 @@ class IngressDeployment:
 
                 # Trim to requested number of results
                 results = results[: req.k]
+
+            # Step 7: Generate recommendation reason for Top-1 item (if generation enabled)
+            # (generation_ms already initialized above before if/else)
+            generation_enabled = os.getenv("GENERATION_ENABLED", "0") == "1"
+            generation_flow = os.getenv("GENERATION_FLOW", "smart")
+
+            if results and self.generation_handle and generation_enabled:
+                # Check if should generate based on flow mode
+                should_generate = (
+                    generation_flow == "all"
+                    or (generation_flow == "search" and intent == "SEARCH")
+                    or (generation_flow == "smart" and flow == "smart")
+                )
+
+                if should_generate:
+                    try:
+                        t_gen0 = time.time()
+                        timeout = (
+                            float(os.getenv("GENERATION_TIMEOUT_MS", "600")) / 1000.0
+                        )
+                        out = await asyncio.wait_for(
+                            self.generation_handle.explain.remote(
+                                req.query, results[0]
+                            ),
+                            timeout=timeout,
+                        )
+                        generation_ms = (time.time() - t_gen0) * 1000
+                        reason_value = out.get("reason", "")
+                        results[0].setdefault("meta", {})["reason"] = reason_value
+                        
+                        # P0-1 Fix: Correct contract_dbg if reason was generated
+                        if reason_value and contract_dbg_cache:
+                            missing_by_field = contract_dbg_cache.get("missing_by_field", {})
+                            if missing_by_field.get("reason", 0) > 0:
+                                missing_by_field["reason"] = 0
+                                contract_dbg_cache["missing_total"] = sum(missing_by_field.values())
+
+                        logger.info(
+                            "request_id=%s generation_success gen_ms=%.2f mode=%s model=%s",
+                            request_id,
+                            generation_ms,
+                            out.get("mode", "unknown"),
+                            out.get("model", "unknown"),
+                        )
+                    except asyncio.TimeoutError:
+                        generation_ms = timeout * 1000
+                        results[0].setdefault("meta", {})["reason"] = ""
+                        logger.warning(
+                            "request_id=%s generation_timeout timeout_ms=%.2f",
+                            request_id,
+                            timeout * 1000,
+                        )
+                    except Exception as e:
+                        generation_ms = (
+                            (time.time() - t_gen0) * 1000 if "t_gen0" in locals() else 0
+                        )
+                        results[0].setdefault("meta", {})["reason"] = ""
+                        logger.exception(
+                            "request_id=%s generation_failed err=%s",
+                            request_id,
+                            e,
+                        )
         except Exception as e:
             # Fallback to popularity on enrichment/filtering failure (P0-2: also needs contract normalize)
             logger.exception(
@@ -771,6 +855,25 @@ class IngressDeployment:
                 rerank_debug = {}
             rerank_debug["effect"] = rerank_effect
 
+        # Build debug info for generation
+        generation_debug = None
+        if generation_ms is not None:
+            generation_enabled = os.getenv("GENERATION_ENABLED", "0") == "1"
+            generation_flow = os.getenv("GENERATION_FLOW", "smart")
+            # Note: mode is logged but not exposed in debug for simplicity
+            generation_debug = {
+                "enabled": generation_enabled,
+                "flow": generation_flow,
+                "latency_ms": round(generation_ms, 2),
+            }
+
+        # Aggregate all debug information
+        extra_debug = {}
+        if rerank_debug:
+            extra_debug["rerank"] = rerank_debug
+        if generation_debug:
+            extra_debug["generation"] = generation_debug
+
         resp = _build_response(
             results,
             route,
@@ -779,18 +882,20 @@ class IngressDeployment:
                 "retrieve": ret_ms,
                 "enrich": enrich_ms,
                 "rerank": rerank_ms,
+                "generation": generation_ms,
             },
-            extra_debug={"rerank": rerank_debug} if rerank_debug else None,
+            extra_debug=extra_debug if extra_debug else None,
         )
 
         # Log request metrics for monitoring and analysis
         total_ms = resp.get("latency_ms", {}).get("total")
         logger.info(
-            "request_id=%s intent=SEARCH k=%d embed_ms=%.2f ret_ms=%.2f total_ms=%.2f filters=%s",
+            "request_id=%s intent=SEARCH k=%d embed_ms=%.2f ret_ms=%.2f gen_ms=%.2f total_ms=%.2f filters=%s",
             request_id,
             req.k,
             embed_ms or -1,
             ret_ms or -1,
+            generation_ms or -1,
             total_ms or -1,
             json.dumps(filters, ensure_ascii=False),
         )
@@ -803,9 +908,15 @@ embedding_node = EmbeddingDeployment.bind()
 retrieval_node = RetrievalDeployment.bind()
 popularity_node = PopularityDeployment.bind()
 reranker_node = RerankerDeployment.bind()
+generation_node = GenerationDeployment.bind()
 
 # Bind ingress deployment with all dependency handles
 # This creates the complete application graph for Ray Serve
 ingress_app = IngressDeployment.bind(
-    router_node, embedding_node, retrieval_node, popularity_node, reranker_node
+    router_node,
+    embedding_node,
+    retrieval_node,
+    popularity_node,
+    reranker_node,
+    generation_node,
 )

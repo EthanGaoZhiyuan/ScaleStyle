@@ -25,13 +25,13 @@ async def test_empty_candidates_fallback_popularity(monkeypatch):
                         {
                             "article_id": "p1",
                             "detail_desc": "popular item 1",
-                            "colour_group_name": "Red",
+                            "color": "Red",
                             "price": "0.1",
                         },
                         {
                             "article_id": "p2",
                             "detail_desc": "popular item 2",
-                            "colour_group_name": "Blue",
+                            "color": "Blue",
                             "price": "0.2",
                         },
                     ]
@@ -62,8 +62,16 @@ async def test_empty_candidates_fallback_popularity(monkeypatch):
             "mode": "stub",
         }
     )
+    generation = FakeHandle(
+        explain=lambda q, item: {
+            "reason": "test reason",
+            "gen_ms": 1,
+            "model": "stub",
+            "device": "cpu",
+        }
+    )
 
-    ing = IngressDeployment(router, embed, retrieval, popularity, reranker)
+    ing = IngressDeployment(router, embed, retrieval, popularity, reranker, generation)
     resp = await ing.search(
         SearchRequest(query="red dress", k=2, debug=True, user_id="u2")
     )
@@ -120,8 +128,16 @@ async def test_redis_timeout_graceful_degradation(monkeypatch):
             "mode": "stub",
         }
     )
+    generation = FakeHandle(
+        explain=lambda q, item: {
+            "reason": "test reason",
+            "gen_ms": 1,
+            "model": "stub",
+            "device": "cpu",
+        }
+    )
 
-    ing = IngressDeployment(router, embed, retrieval, popularity, reranker)
+    ing = IngressDeployment(router, embed, retrieval, popularity, reranker, generation)
 
     # Even with Redis timeout, request should not crash
     resp = await ing.search(SearchRequest(query="test", k=1, debug=True, user_id="u2"))
@@ -187,8 +203,16 @@ async def test_ab_flow_base_no_rerank(monkeypatch):
     )
     popularity = FakeHandle(topk=lambda k: [{"article_id": "p1"}])
     reranker = FakeHandle(score=rerank_score)
+    generation = FakeHandle(
+        explain=lambda q, item: {
+            "reason": "test reason",
+            "gen_ms": 1,
+            "model": "stub",
+            "device": "cpu",
+        }
+    )
 
-    ing = IngressDeployment(router, embed, retrieval, popularity, reranker)
+    ing = IngressDeployment(router, embed, retrieval, popularity, reranker, generation)
     resp = await ing.search(SearchRequest(query="test", k=1, debug=True, user_id="u1"))
 
     # Base flow should NOT call reranker
@@ -218,7 +242,7 @@ async def test_ab_flow_smart_calls_rerank(monkeypatch):
                         {
                             "article_id": "1",
                             "detail_desc": "test item",
-                            "colour_group_name": "Red",
+                            "color": "Red",
                             "price": "0.1",
                         }
                     ]
@@ -252,8 +276,16 @@ async def test_ab_flow_smart_calls_rerank(monkeypatch):
     )
     popularity = FakeHandle(topk=lambda k: [{"article_id": "p1"}])
     reranker = FakeHandle(score=rerank_score)
+    generation = FakeHandle(
+        explain=lambda q, item: {
+            "reason": "test reason",
+            "gen_ms": 1,
+            "model": "stub",
+            "device": "cpu",
+        }
+    )
 
-    ing = IngressDeployment(router, embed, retrieval, popularity, reranker)
+    ing = IngressDeployment(router, embed, retrieval, popularity, reranker, generation)
     resp = await ing.search(SearchRequest(query="test", k=1, debug=True, user_id="u2"))
 
     # Smart flow should call reranker

@@ -75,6 +75,30 @@ class ABTestConfig:
     ).lower()  # vector or popularity
 
 
+class GenerationConfig:
+    """Generation model configuration."""
+
+    @staticmethod
+    def _get_bool(name: str, default: bool = False) -> bool:
+        """Parse boolean from environment variable."""
+        val = os.getenv(name)
+        if val is None:
+            return default
+        return val.strip().lower() in ("1", "true", "yes", "y", "on")
+
+    ENABLED = _get_bool.__func__("GENERATION_ENABLED", False)  # Default off
+    MODE = os.getenv("GENERATION_MODE", "template").lower()  # template or llm
+    TIMEOUT_MS = int(os.getenv("GENERATION_TIMEOUT_MS", "600"))
+    FLOW = os.getenv("GENERATION_FLOW", "smart")  # smart or all
+    MODEL = os.getenv("GENERATION_MODEL", "Qwen/Qwen2-1.5B-Instruct")
+    DEVICE = os.getenv("GENERATION_DEVICE", "auto")
+    MAX_NEW_TOKENS = int(os.getenv("GENERATION_MAX_NEW_TOKENS", "48"))
+    TEMPERATURE = float(os.getenv("GENERATION_TEMPERATURE", "0.2"))
+    TOP_P = float(os.getenv("GENERATION_TOP_P", "0.9"))
+    DO_SAMPLE = _get_bool.__func__("GENERATION_DO_SAMPLE", False)
+    WARMUP = _get_bool.__func__("GENERATION_WARMUP", True)
+
+
 class InferenceConfig:
     """Main configuration class aggregating all sub-configs."""
 
@@ -84,6 +108,7 @@ class InferenceConfig:
     retrieval = RetrievalConfig
     reranker = RerankerConfig
     ab_test = ABTestConfig
+    generation = GenerationConfig
 
 
 # Legacy support for data-pipeline (if still needed)
