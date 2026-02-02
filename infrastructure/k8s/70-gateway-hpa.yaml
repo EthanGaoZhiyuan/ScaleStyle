@@ -1,0 +1,71 @@
+---
+# Horizontal Pod Autoscaler for Gateway Service
+# Automatically scales gateway pods based on CPU utilization and custom metrics
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gateway-hpa
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: gateway-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gateway
+  
+  # Scaling boundaries
+  minReplicas: 2
+  maxReplicas: 8
+  
+  # Metrics for scaling decisions
+  metrics:
+  # CPU-based scaling (primary metric)
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60  # Scale when avg CPU > 60%
+  
+  # Memory-based scaling (secondary metric)
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 75  # Scale when avg memory > 75%
+  
+  # Optional: Custom metrics (requires metrics-server and custom metrics adapter)
+  # - type: Pods
+  #   pods:
+  #     metric:
+  #       name: http_requests_per_second
+  #     target:
+  #       type: AverageValue
+  #       averageValue: "1000"  # Scale when avg RPS > 1000
+  
+  # Scaling behavior
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30  # Wait 30s before scaling up
+      policies:
+      - type: Percent
+        value: 50  # Add 50% of current replicas
+        periodSeconds: 30
+      - type: Pods
+        value: 2  # Or add 2 pods at a time
+        periodSeconds: 30
+      selectPolicy: Max  # Use the policy that adds most pods
+    
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Wait 5min before scaling down
+      policies:
+      - type: Percent
+        value: 50  # Remove 50% of current replicas
+        periodSeconds: 60
+      - type: Pods
+        value: 1  # Or remove 1 pod at a time
+        periodSeconds: 60
+      selectPolicy: Min  # Use the policy that removes fewest pods

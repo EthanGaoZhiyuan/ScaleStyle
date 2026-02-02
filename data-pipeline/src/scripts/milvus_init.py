@@ -1,5 +1,11 @@
 import math
 import os
+import sys
+
+# Add parent directory to path to import from inference-service
+sys.path.insert(
+    0, os.path.join(os.path.dirname(__file__), "../../..", "inference-service")
+)
 
 import pandas as pd
 from pymilvus import (
@@ -7,9 +13,9 @@ from pymilvus import (
     CollectionSchema,
     DataType,
     FieldSchema,
-    connections,
     utility,
 )
+from src.ray_serve.utils.milvus_client import ensure_connection
 
 DATA_PATH = os.getenv(
     "DATA_PATH", "data-pipeline/data/article_embeddings_bge_v2.parquet"
@@ -34,7 +40,8 @@ def main():
     first = df.iloc[0][EMBEDDING_COL]
     dim = len(first)
 
-    connections.connect("default", host=MILVUS_HOST, port=MILVUS_PORT)
+    # Connect to Milvus with automatic retry logic
+    ensure_connection("default", max_retries=3, retry_delay=2.0)
 
     if utility.has_collection(COLLECTION):
         col = Collection(COLLECTION)

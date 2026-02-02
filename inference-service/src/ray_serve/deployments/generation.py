@@ -116,14 +116,14 @@ class GenerationDeployment:
             self.model = None
             return
 
-        # ---- cache dir (防重复下载) ----
+        # ---- cache dir (prevent duplicate downloads) ----
         hf_home = os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
         os.environ.setdefault("HF_HOME", hf_home)
         os.environ.setdefault(
             "TRANSFORMERS_CACHE", os.path.join(hf_home, "transformers")
         )
 
-        # ---- config ---- (P0-1 Fix: 支持双命名兼容GEN_*和GENERATION_*)
+        # ---- config ---- (P0-1 Fix: Support dual naming compatibility GEN_* and GENERATION_*)
         self.model_name = (
             os.getenv("GENERATION_MODEL")
             or os.getenv("GEN_MODEL_NAME")
@@ -179,7 +179,7 @@ class GenerationDeployment:
             self.init_ms = (time.time() - t0) * 1000
             logger.info(f"Model loaded successfully in {self.init_ms:.1f}ms")
 
-            # ---- warmup (避免第一条请求冷启动) ----
+            # ---- warmup (avoid cold start for first request) ----
             if os.getenv("GENERATION_WARMUP", "1") == "1":
                 try:
                     logger.info("Running warmup...")
@@ -205,14 +205,14 @@ class GenerationDeployment:
         Returns:
             str: Formatted prompt
         """
-        meta = item.get("meta") or item  # 兼容传进来是 item 或 meta
+        meta = item.get("meta") or item  # Compatible with both item and meta input
         title = meta.get("title") or meta.get("prod_name") or ""
         desc = meta.get("desc") or meta.get("detail_desc") or ""
         dept = meta.get("dept") or meta.get("department_name") or ""
         color = meta.get("color") or meta.get("colour_group_name") or ""
         price = meta.get("price") or ""
 
-        # 尽量短：生成要快
+        # Keep it short: generation must be fast
         item_str = (
             f"title={title}; dept={dept}; color={color}; price={price}; desc={desc}"
         )

@@ -1,0 +1,68 @@
+# KubeRay Operator Helm Values
+# For installing KubeRay operator to manage Ray clusters
+# Installation: helm install kuberay-operator kuberay/kuberay-operator -f kuberay-operator.yaml
+
+# Operator image configuration
+image:
+  repository: kuberay/operator
+  tag: v1.0.0
+  pullPolicy: IfNotPresent
+
+# Number of operator replicas
+replicaCount: 1
+
+# Resource limits for operator
+resources:
+  limits:
+    cpu: 100m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+# Service account
+serviceAccount:
+  create: true
+  name: kuberay-operator
+
+# RBAC settings
+rbac:
+  create: true
+
+# Namespace to watch (empty means all namespaces)
+# Set to "scalestyle" to only watch our namespace
+singleNamespaceInstall: false
+watchNamespace: ""
+
+# Logging
+logLevel: info
+
+# Batch scheduling (optional - for better resource management)
+batchScheduler:
+  enabled: false
+
+# Webhook (optional - for validation)
+webhook:
+  enabled: false
+
+# Operator configuration
+operatorConfig:
+  # Enable Ray dashboard
+  enableRayDashboard: true
+  
+  # Ray autoscaler settings
+  rayAutoscalerImage: rayproject/ray:2.9.0
+  
+  # Default resources for Ray pods
+  defaultRayNodeResources:
+    cpu: "1"
+    memory: "2Gi"
+
+# Node selector (optional)
+nodeSelector: {}
+
+# Tolerations (optional)
+tolerations: []
+
+# Affinity (optional)
+affinity: {}

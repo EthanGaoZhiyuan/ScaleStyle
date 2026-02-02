@@ -1,0 +1,88 @@
+---
+# Data Initialization Job: Load data into Redis and Milvus
+# P0-3 Fix: Uses pre-built image with dependencies for fast, reliable initialization
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-init
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: data-init
+spec:
+  # Keep job history for debugging
+  ttlSecondsAfterFinished: 3600  # Clean up after 1 hour
+  backoffLimit: 3  # Retry up to 3 times on failure
+  
+  template:
+    metadata:
+      labels:
+        app: scalestyle
+        component: data-init
+    spec:
+      restartPolicy: OnFailure
+      
+      # Init containers to wait for dependencies
+      initContainers:
+      - name: wait-for-redis
+        image: busybox:1.35
+        command:
+        - sh
+        - -c
+        - |
+          echo "Waiting for Redis..."
+          until nc -z redis 6379; do
+            echo "Redis not ready, sleeping..."
+            sleep 2
+          done
+          echo "Redis is ready!"
+      
+      - name: wait-for-milvus
+        image: busybox:1.35
+        command:
+        - sh
+        - -c
+        - |
+          echo "Waiting for Milvus..."
+          until nc -z milvus 19530; do
+            echo "Milvus not ready, sleeping..."
+            sleep 5
+          done
+          echo "Milvus is ready!"
+      
+      containers:
+      - name: data-loader
+        # P0-3 Fix: Use pre-built image with dependencies baked in
+        # Build: docker build -t your-dockerhub-username/scalestyle-data-init:latest ./data-pipeline
+        # Push: docker push your-dockerhub-username/scalestyle-data-init:latest
+        image: your-dockerhub-username/scalestyle-data-init:latest
+        imagePullPolicy: Always
+        
+        # Run bootstrap script from the image
+        command: ["python", "-m", "src.bootstrap_data"]
+        
+        # Arguments for bootstrap script
+        args:
+        - "--skip-milvus"  # Skip Milvus for now (only load Redis)
+        - "--no-verify"    # Skip verification (faster)
+        
+        # Environment variables from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: scalestyle-config
+        
+        # Resource limits
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "1Gi"
+      
+      # Optional: Mount data files from PVC
+      # volumes:
+      # - name: data-files
+      #   persistentVolumeClaim:
+      #     claimName: scalestyle-data-pvc
+

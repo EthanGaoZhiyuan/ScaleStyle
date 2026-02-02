@@ -1,0 +1,131 @@
+# Milvus Standalone Configuration for ScaleStyle
+# Optimized for development/demo environment
+# For production, consider Milvus cluster mode
+
+# Standalone mode (single pod with all components)
+cluster:
+  enabled: false
+
+# Standalone configuration
+standalone:
+  replicas: 1
+  
+  resources:
+    limits:
+      cpu: "2"
+      memory: 4Gi
+    requests:
+      cpu: "500m"
+      memory: 1Gi
+  
+  # Persistence for data durability
+  persistence:
+    enabled: true
+    size: 20Gi
+    # storageClass: ""  # Use default storage class
+
+# etcd configuration (metadata store)
+etcd:
+  enabled: true
+  replicaCount: 1
+  
+  resources:
+    limits:
+      cpu: "500m"
+      memory: 512Mi
+    requests:
+      cpu: "100m"
+      memory: 128Mi
+  
+  persistence:
+    enabled: true
+    size: 10Gi
+
+# MinIO configuration (object storage)
+minio:
+  enabled: true
+  mode: standalone
+  
+  resources:
+    limits:
+      cpu: "500m"
+      memory: 512Mi
+    requests:
+      cpu: "100m"
+      memory: 128Mi
+  
+  persistence:
+    enabled: true
+    size: 20Gi
+  
+  # Default credentials (change for production!)
+  rootUser: minioadmin
+  rootPassword: minioadmin
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 19530
+  
+  # Expose additional ports if needed
+  # nodePort: 30530  # For NodePort access
+
+# Milvus configuration
+milvus:
+  # Log level
+  log:
+    level: info
+  
+  # Data storage path
+  dataPath: /var/lib/milvus
+  
+  # Query node configuration
+  queryNode:
+    replicas: 1
+  
+  # Index node configuration
+  indexNode:
+    replicas: 1
+  
+  # Data node configuration
+  dataNode:
+    replicas: 1
+
+# Image configuration
+image:
+  # Use official Milvus images
+  all:
+    repository: milvusdb/milvus
+    tag: v2.3.3
+    pullPolicy: IfNotPresent
+
+# Health checks
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 90
+  periodSeconds: 30
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 5
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 5
+
+# Metrics (for Prometheus)
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false  # Enable if you have Prometheus Operator
+
+# Resource quotas
+# Adjust based on your cluster capacity
+quotaAndLimits:
+  enabled: true
+  quotaConfig:
+    # Max collections per database
+    maxCollectionNum: 64

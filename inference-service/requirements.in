@@ -1,0 +1,60 @@
+# ==========================================
+# ScaleStyle Inference Service Dependencies
+# ==========================================
+# This is the source file for pip-compile
+# To regenerate requirements.txt: pip-compile requirements.in
+
+# ==========================================
+# Core Serving Engine
+# ==========================================
+ray[serve]>=2.9.0,<2.10
+
+# ==========================================
+# AI & Deep Learning
+# ==========================================
+torch>=2.1.0,<2.2
+transformers>=4.37.0,<4.38
+accelerate>=0.26.0,<0.27
+sentencepiece>=0.1.99
+sentence-transformers>=2.6.0,<2.7
+
+# ==========================================
+# Vector Database & Storage
+# ==========================================
+pymilvus>=2.3.0,<2.4
+redis>=5.0.0,<6.0
+
+# ==========================================
+# gRPC & Protocol Buffers
+# ==========================================
+grpcio==1.76.0
+grpcio-tools==1.76.0
+protobuf==6.33.2
+
+# ==========================================
+# Data Processing
+# ==========================================
+pyarrow==22.0.0
+numpy==2.2.6
+pandas>=2.0.0,<2.1
+
+# ==========================================
+# Web & API
+# ==========================================
+fastapi>=0.100.0,<0.101
+uvicorn>=0.23.0,<0.24
+pydantic>=2.0.0,<3.0
+
+# ==========================================
+# Observability
+# ==========================================
+opentelemetry-api>=1.20.0,<1.21
+opentelemetry-sdk>=1.20.0,<1.21
+opentelemetry-exporter-otlp-proto-grpc>=1.20.0,<1.21
+opentelemetry-instrumentation-fastapi>=0.41b0,<0.42
+
+# ==========================================
+# Testing & Development
+# ==========================================
+pytest>=7.4.0
+httpx>=0.24.0

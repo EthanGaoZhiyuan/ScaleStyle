@@ -1,0 +1,14 @@
+# Grafana Dashboard Provisioning
+# Auto-imports dashboards from the specified folder on Grafana startup
+apiVersion: 1
+
+providers:
+  - name: 'ScaleStyle Dashboards'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards

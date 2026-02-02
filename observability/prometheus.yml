@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Gateway Service (Spring Boot with Micrometer)
+  - job_name: 'gateway-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['gateway-service:8080']
+        labels:
+          service: 'gateway'
+          env: 'development'
+
+  # Inference Service (Python with prometheus_client)
+  - job_name: 'inference-service'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['inference-service:8000']
+        labels:
+          service: 'inference'
+          env: 'development'

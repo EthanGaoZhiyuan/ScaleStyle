@@ -67,14 +67,21 @@ yarn-error.log*
 # =========================
 # Data / Artifacts
 # =========================
-data-pipeline/data/
-*.csv
-*.parquet
-*.json
-*.pkl
-*.pt
-*.bin
-*.safetensors
+# Only ignore data files in data-pipeline directory
+# Don't ignore important config files like Grafana dashboards
+data-pipeline/data/**/*.csv
+data-pipeline/data/**/*.parquet
+data-pipeline/data/**/*.json
+data-pipeline/data/**/*.pkl
+data-pipeline/data/**/*.pt
+data-pipeline/data/**/*.bin
+data-pipeline/data/**/*.safetensors
+
+# Keep important JSON files (like Grafana dashboards, package.json, etc.)
+!observability/grafana/**/*.json
+!**/package.json
+!**/tsconfig.json
+!**/*.config.json
 
 # ===== OS =====
 .DS_Store
@@ -82,3 +89,5 @@ data-pipeline/data/
 # Keep package lock files
 !**/package.json
 !**/package-lock.json
+docs/production-deployment.md
+gateway-service/CACHING.md

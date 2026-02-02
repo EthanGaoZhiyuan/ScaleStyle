@@ -66,13 +66,17 @@ def main():
 
     pipe.execute()
 
-    # ---------- 2) Popularity list ----------
+    # ---------- 2) Popularity ZSET (gateway expects ZSET, not list) ----------
     print(
-        f"[loader] writing popularity list key={POPULARITY_KEY} size={len(popularity_ids)}"
+        f"[loader] writing popularity ZSET key={POPULARITY_KEY} size={len(popularity_ids)}"
     )
     r.delete(POPULARITY_KEY)
     if popularity_ids:
-        r.rpush(POPULARITY_KEY, *popularity_ids)
+        # Use ZADD with scores: higher score = more popular
+        popularity_mapping = {
+            pid: len(popularity_ids) - i for i, pid in enumerate(popularity_ids)
+        }
+        r.zadd(POPULARITY_KEY, popularity_mapping)
 
     # ---------- 3) Milvus load check ----------
     uri = f"http://{MILVUS_HOST}:{MILVUS_PORT}"

@@ -1,0 +1,50 @@
+# Build outputs
+target/
+build/
+bin/
+out/
+
+# IDE files
+.idea/
+.vscode/
+.settings/
+.project
+.classpath
+*.iml
+*.ipr
+*.iws
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Test reports
+test-results/
+test-reports/
+
+# Documentation
+docs/
+README.md
+*.md
+
+# Scripts (not needed in image)
+scripts/
+
+# Gradle wrapper (optional - depends on your preference)
+.gradle/
+gradle/
+gradlew
+gradlew.bat
+# Keep OpenTelemetry agent (needed for runtime instrumentation)
+!opentelemetry-javaagent.jar

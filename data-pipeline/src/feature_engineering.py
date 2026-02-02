@@ -99,6 +99,19 @@ def preprocess_articles(articles_df: DataFrame) -> DataFrame:
         creating a crossed feature 'department_group'.
     """
 
+    # .na() Returns a DataFrameNaFunctions for handling missing values.
+    # Ref: https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/api/pyspark.sql.DataFrame.na.html
+    # .drop() Returns a new DataFrame omitting rows with null or NaN values. DataFrame.dropna() and DataFrameNaFunctions.drop() are aliases of each other.
+    # Ref: https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/api/pyspark.sql.DataFrameNaFunctions.drop.html#pyspark.sql.DataFrameNaFunctions.drop
+    #
+    # @dispatch_df_method
+    # def drop(
+    #     self,
+    #     how: str = "any",
+    #     thresh: Optional[int] = None,
+    #     subset: Optional[Union[str, Tuple[str, ...], List[str]]] = None,
+    # ) -> DataFrame:
+    #
     # 1. Handle missing product_type_no
     df = articles_df.na.drop(subset=["detail_desc"])
 
@@ -171,6 +184,8 @@ def preprocess_transactions(transactions_df: DataFrame) -> DataFrame:
     # 2. Time Decay Weighting
     max_date = df.agg(F.max("t_dat")).collect()[0][0]
 
+    # F.datediff(end, start) Returns the number of days between two dates.
+    # Ref: https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/api/pyspark.sql.functions.datediff.html
     # 3. Days Difference Calculation
     df = df.withColumn("days_diff", F.datediff(F.lit(max_date), F.col("t_dat")))
 
@@ -192,7 +207,8 @@ def preprocess_transactions(transactions_df: DataFrame) -> DataFrame:
 
 
 def generate_negative_samples(df_interactions: DataFrame, ratio: int = 4) -> DataFrame:
-    """Phase 2 Upgrade: Popularity-based negative sampling
+    """
+    Phase 2 Upgrade: Popularity-based negative sampling
 
     Generates negative samples for implicit feedback data using popularity-based sampling.
 
@@ -214,7 +230,9 @@ def generate_negative_samples(df_interactions: DataFrame, ratio: int = 4) -> Dat
 
     popular_items = [row["article_id"] for row in top_items.collect()]
 
-    # 3. Negative Sampling UDF
+    # 3. Negative Sampling Logic (Pure Python)
+    # This function defines the logic for sampling negative items.
+    # It runs on the worker nodes (executors) and operates on standard Python lists.
     def get_negative_samples(purchased_items):
         if not purchased_items:
             return []
@@ -233,6 +251,20 @@ def generate_negative_samples(df_interactions: DataFrame, ratio: int = 4) -> Dat
 
         return list(negatives)
 
+    # .udf() Creates a user-defined function (UDF) that can be used in DataFrame operations.
+    # Ref: https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/api/pyspark.sql.functions.udf.html
+    # IntegerType() The data type representing integer values.
+    # Ref: https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/api/pyspark.sql.types.IntegerType.html
+    # ArrayType() The data type representing arrays of a specified element type.
+    # Ref: https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/api/pyspark.sql.types.ArrayType.html
+    # Why F.udf()?
+    # Register as Spark UDF
+    # We wrap the Python function with F.udf to make it usable in Spark distributed operations.
+    # - Serialization: Spark pickles the function to send it to worker nodes.
+    # - Schema Enforcement: ArrayType(IntegerType()) tells Spark the return type is List[int].
+    #   Without this, Spark cannot infer the schema for the new column.
+    #
+    # Ref: https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/api/pyspark.sql.functions.udf.html
     get_negatives_udf = F.udf(get_negative_samples, ArrayType(IntegerType()))
 
     # 4. Generate Negative Samples
@@ -268,6 +300,8 @@ def generate_negative_samples(df_interactions: DataFrame, ratio: int = 4) -> Dat
         "sales_channel_id",
     ]
 
+    # Merge positive (purchased) and negative (non-purchased) samples into one training set.
+    # unionByName ensures columns are aligned correctly by name, creating the final dataset for binary classification.
     final_df = positives.select(*common_cols).unionByName(
         negatives.select(*common_cols)
     )

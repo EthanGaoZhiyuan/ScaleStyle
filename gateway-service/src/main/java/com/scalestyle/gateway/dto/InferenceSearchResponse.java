@@ -27,5 +27,11 @@ public class InferenceSearchResponse {
         
         private Double score;
         private Map<String, Object> meta;
+        
+        // Week 3: AI recommendation reason
+        private String reason;
+        
+        @JsonProperty("reason_source")
+        private String reasonSource;
     }
 }

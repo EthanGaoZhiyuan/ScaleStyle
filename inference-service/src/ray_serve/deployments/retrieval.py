@@ -1,12 +1,12 @@
 import logging
 import asyncio
+import os
 import time
 from typing import List, Dict, Any, Optional
 
 from ray import serve
-from pymilvus import MilvusClient
 
-from src.config import MilvusConfig
+from src.ray_serve.utils.milvus_client import create_milvus_client
 
 logger = logging.getLogger("scalestyle.retrieval")
 
@@ -26,39 +26,64 @@ class RetrievalDeployment:
 
         Establishes connection to Milvus vector database and loads the collection.
         If the collection is not found, the deployment enters a not-ready state.
+
+        Uses exponential backoff retry for production resilience.
         """
         # Initialize ready state to False until Milvus is fully loaded
         self.ready = False
+        self.collection_name = os.getenv("MILVUS_COLLECTION", "scale_style_bge_v2")
 
-        # Load Milvus connection parameters from centralized config
-        self.milvus_host = MilvusConfig.HOST
-        self.milvus_port = MilvusConfig.PORT
-        self.collection_name = MilvusConfig.COLLECTION
+        logger.info(
+            f"🚀 Initializing RetrievalDeployment for collection: {self.collection_name}"
+        )
 
-        # Connect to Milvus
-        uri = f"http://{self.milvus_host}:{self.milvus_port}"
-        self.client = MilvusClient(uri=uri)
-
-        # Check if the Milvus collection exists
-        if not self.client.has_collection(self.collection_name):
-            logger.warning(
-                "Milvus collection '%s' not found. Retrieval will be DISABLED until init is done. "
-                "Run: python data-pipeline/src/scripts/milvus_init.py",
-                self.collection_name,
-            )
-            self.ready = False
-            return
-
-        # Initialize lock for thread safety during concurrent requests
-        self._lock = asyncio.Lock()
-
-        # Load the collection into memory for search operations
         try:
-            self.client.load_collection(self.collection_name)
-            self.ready = True
-            logger.info("Milvus ready uri=%s collection=%s", uri, self.collection_name)
+            # Connect to Milvus using utility function with automatic retry logic
+            # Reads MILVUS_HOST and MILVUS_PORT from environment at runtime
+            logger.info("Connecting to Milvus with retry logic...")
+            self.client = create_milvus_client(max_retries=10, retry_delay=3.0)
+            logger.info("✅ Milvus client created successfully")
+
+            # Check if the Milvus collection exists
+            logger.info(f"Checking if collection '{self.collection_name}' exists...")
+            if not self.client.has_collection(self.collection_name):
+                logger.error(
+                    f"❌ Milvus collection '{self.collection_name}' not found. "
+                    "Retrieval will be DISABLED until init is done. "
+                    "Run: python data-pipeline/src/scripts/milvus_init.py"
+                )
+                self.ready = False
+                return
+
+            logger.info(f"✅ Collection '{self.collection_name}' found")
+
+            # Initialize lock for thread safety during concurrent requests
+            self._lock = asyncio.Lock()
+
+            # Load the collection into memory for search operations
+            logger.info(f"Loading collection '{self.collection_name}' into memory...")
+            try:
+                self.client.load_collection(self.collection_name)
+                self.ready = True
+
+                # Get collection statistics
+                stats = self.client.get_collection_stats(self.collection_name)
+                row_count = stats.get("row_count", "unknown")
+                logger.info(
+                    f"✅ Milvus retrieval ready! Collection: {self.collection_name}, "
+                    f"Rows: {row_count}"
+                )
+            except Exception as e:
+                logger.error(
+                    f"❌ Failed to load collection '{self.collection_name}': {e}"
+                )
+                self.ready = False
+
         except Exception as e:
-            logger.exception("Milvus load_collection failed: %s", e)
+            logger.error(
+                f"❌ Failed to initialize RetrievalDeployment: {type(e).__name__}: {e}",
+                exc_info=True,
+            )
             self.ready = False
 
     async def is_ready(self) -> bool:

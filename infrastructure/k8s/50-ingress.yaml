@@ -1,0 +1,104 @@
+---
+# Ingress: Expose gateway to external traffic
+# Works with both Minikube (nginx) and EKS (ALB)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: scalestyle-ingress
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: ingress
+  annotations:
+    # Nginx Ingress Controller annotations (for Minikube)
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    
+    # AWS ALB Ingress Controller annotations (for EKS) - commented out by default
+    # alb.ingress.kubernetes.io/scheme: internet-facing
+    # alb.ingress.kubernetes.io/target-type: ip
+    # alb.ingress.kubernetes.io/healthcheck-path: /actuator/health
+    # alb.ingress.kubernetes.io/healthcheck-interval-seconds: '15'
+    # alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '5'
+    # alb.ingress.kubernetes.io/success-codes: '200'
+    # alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+spec:
+  ingressClassName: nginx  # Change to 'alb' for EKS
+  rules:
+  - host: scalestyle.local  # For Minikube: add to /etc/hosts
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: gateway
+            port:
+              number: 8080
+  
+  # Optional: Uncomment for host-less access (Minikube IP directly)
+  # - http:
+  #     paths:
+  #     - path: /
+  #       pathType: Prefix
+  #       backend:
+  #         service:
+  #           name: gateway
+  #           port:
+  #             number: 8080
+
+---
+# Optional: Ingress for Ray Serve Dashboard (development only)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: scalestyle-dashboard-ingress
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: dashboard
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: dashboard.scalestyle.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: inference
+            port:
+              number: 8265
+
+---
+# Optional: Ingress for Jaeger UI (tracing visualization)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: scalestyle-jaeger-ingress
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: jaeger
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: jaeger.scalestyle.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: jaeger-query
+            port:
+              number: 16686

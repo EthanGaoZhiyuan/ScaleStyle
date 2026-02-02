@@ -1,32 +1,78 @@
-# Use official Python slim image as base
-FROM python:3.10-slim
+# ==========================================
+# Stage 1: Builder Stage
+# ==========================================
+FROM python:3.11-slim AS builder
 
-# Set working directory
-WORKDIR /app
+WORKDIR /build
 
-# Install system dependencies
+# Install system dependencies for building Python packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    gcc \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Copy requirements first (better layer caching)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Python dependencies to a specific directory
+# Use BuildKit cache mount for pip cache (speeds up CI builds)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --prefix=/install -r requirements.txt
+
+# ==========================================
+# Stage 2: Runtime Stage (Production-ready)
+# ==========================================
+FROM python:3.11-slim
+
+# OCI Labels for traceability (best practice for production)
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+LABEL org.opencontainers.image.title="ScaleStyle Inference Service" \
+      org.opencontainers.image.description="AI-powered recommendation inference service with Ray Serve" \
+      org.opencontainers.image.version="1.0.0" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.source="https://github.com/EthanGaoZhiyuan/ScaleStyle" \
+      org.opencontainers.image.vendor="ScaleStyle Team"
+
+WORKDIR /app
+
+# Install runtime dependencies only (curl for healthcheck)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed packages from builder
+COPY --from=builder /install /usr/local
 
 # Copy application code
-COPY . .
+COPY src ./src
+COPY server.py .
 
-# Set environment variables
+# Create non-root user for security
+RUN useradd -m -u 1000 scalestyle && \
+    mkdir -p /cache/huggingface && \
+    chown -R scalestyle:scalestyle /app /cache
+
+USER scalestyle
+
+# Environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH="/app"
-
-# HuggingFace cache (container-level defaults; compose/k8s should mount volume)
 ENV HF_HOME=/cache/huggingface
 ENV TRANSFORMERS_CACHE=/cache/huggingface/hub
 ENV HF_HUB_DISABLE_PROGRESS_BARS=1
+ENV HF_HUB_DISABLE_TELEMETRY=1
+ENV TOKENIZERS_PARALLELISM=false
 
-# Expose port for Ray Serve
+# Expose Ray Serve port
 EXPOSE 8000
 
-# Start Ray Serve with the specified configuration
+# Health check for K8s readiness probe
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/readyz || exit 1
+
+# Start Ray Serve with configuration
 CMD ["serve", "run", "src/ray_serve/config.yaml"]
+

@@ -1,0 +1,95 @@
+---
+# Redis Deployment: In-memory cache for popular items and metadata
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: redis
+    version: "7.2"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scalestyle
+      component: redis
+  template:
+    metadata:
+      labels:
+        app: scalestyle
+        component: redis
+        version: "7.2"
+    spec:
+      containers:
+      - name: redis
+        image: redis:7.2-alpine
+        ports:
+        - name: redis
+          containerPort: 6379
+          protocol: TCP
+        
+        # Resource limits
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        
+        # Health checks
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        
+        # Persistent volume (optional - for production)
+        # volumeMounts:
+        # - name: redis-data
+        #   mountPath: /data
+      
+      # volumes:
+      # - name: redis-data
+      #   persistentVolumeClaim:
+      #     claimName: redis-pvc
+
+---
+# Redis Service: ClusterIP for internal access
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: redis
+spec:
+  type: ClusterIP
+  selector:
+    app: scalestyle
+    component: redis
+  ports:
+  - name: redis
+    port: 6379
+    targetPort: 6379
+    protocol: TCP
+  sessionAffinity: None

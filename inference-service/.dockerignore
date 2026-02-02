@@ -1,0 +1,75 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Data files (IMPORTANT: Don't bake datasets into image)
+data/
+notebooks/
+*.csv
+*.parquet
+*.json
+
+# Model cache (models should be downloaded at runtime or mounted)
+.cache/
+models/
+checkpoints/
+
+# HuggingFace cache (should be volume-mounted)
+.cache/huggingface/
+
+# Logs
+*.log
+logs/
+
+# Test files
+tests/
+test_*.py
+*_test.py
+pytest.ini
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Documentation
+docs/
+README.md
+*.md
+
+# Scripts (not needed in runtime image)
+scripts/
+
+# Proto generated files (will be regenerated)
+src/proto/*.py
+
+# Ray temporary files
+/tmp/ray/

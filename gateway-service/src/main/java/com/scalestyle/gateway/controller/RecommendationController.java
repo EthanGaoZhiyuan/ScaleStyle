@@ -20,30 +20,20 @@ import java.util.Map;
 public class RecommendationController {
     private final RecommendationService recommendationService;
 
-    @GetMapping("/debug/cache-check")
-    public Map<String, Object> debugCache(@RequestParam(required = false) String id) {
-        // If ID is provided, query this one; otherwise return cache size and first 10 entries
-        if (id != null) {
-            return Map.of(
-                    "queryId", id,
-                    "exists", recommendationService.getProductCache().containsKey(id),
-                    "data", recommendationService.getProductCache().get(id)
-            );
-        }
-        return Map.of(
-                "cacheSize", recommendationService.getProductCache().size(),
-                "sampleKeys", recommendationService.getProductCache().keySet().stream().limit(10).toList()
-        );
+    @GetMapping("/debug/cache-stats")
+    public Map<String, Object> cacheStats() {
+        return recommendationService.getCacheStats();
     }
 
     @GetMapping("/search")
     public CommonApiResponse<List<RecommendationDTO>> search(
             @RequestParam String query,
             @RequestParam(required = false) String userId,
+            @RequestParam(required = false, defaultValue = "search") String intent,
             @RequestParam(defaultValue = "10") Integer k,
             @RequestParam(defaultValue = "false") Boolean debug
     ) {
-        return CommonApiResponse.success(recommendationService.search(query, userId, k, debug));
+        return CommonApiResponse.success(recommendationService.search(query, userId, intent, k, debug));
     }
 
 }

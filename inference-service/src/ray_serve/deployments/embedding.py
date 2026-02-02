@@ -34,6 +34,8 @@ class EmbeddingDeployment:
 
         Configures device (CPU/GPU), loads tokenizer and model, and prepares
         for embedding generation. Configuration is controlled via environment variables.
+
+        Enterprise optimization: Model warmup + cache verification
         """
         # Initialize ready state to False until model is fully loaded
         self.ready = False
@@ -49,30 +51,55 @@ class EmbeddingDeployment:
         # Set data type: float16 for GPU (faster), float32 for CPU (more stable)
         self.dtype = torch.float16 if self.device == "cuda" else torch.float32
 
+        logger.info(f"🚀 Initializing EmbeddingDeployment: {self.model_name}")
+        logger.info(f"   Device: {self.device}, dtype: {self.dtype}")
+
         # Load tokenizer and measure loading time
         t0 = time.time()
+        logger.info("📥 Loading tokenizer...")
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         t_tok = (time.time() - t0) * 1000
+        logger.info(f"✅ Tokenizer loaded in {t_tok:.2f}ms")
 
         # Load model and move to appropriate device
         t1 = time.time()
-        self.model = AutoModel.from_pretrained(self.model_name, dtype=self.dtype)
+        logger.info("📥 Loading model (this may take 30-60s for large models)...")
+        self.model = AutoModel.from_pretrained(self.model_name, torch_dtype=self.dtype)
         # Set model to evaluation mode (disable dropout, etc.)
         self.model.to(self.device).eval()
         t_model = (time.time() - t1) * 1000
+        logger.info(f"✅ Model loaded and moved to {self.device} in {t_model:.2f}ms")
+
+        # Enterprise optimization: Model warmup
+        # Run a dummy inference to ensure all components are initialized
+        logger.info("🔥 Warming up model with dummy inference...")
+        try:
+            t_warmup = time.time()
+            dummy_text = "Hello world"
+            with torch.no_grad():
+                inputs = self.tokenizer(
+                    dummy_text,
+                    max_length=self.max_length,
+                    truncation=True,
+                    padding=True,
+                    return_tensors="pt",
+                ).to(self.device)
+                _ = self.model(**inputs)
+            warmup_ms = (time.time() - t_warmup) * 1000
+            logger.info(f"✅ Model warmup completed in {warmup_ms:.2f}ms")
+        except Exception as e:
+            logger.warning(f"⚠️  Model warmup failed (non-critical): {e}")
 
         # Initialize lock for thread safety during concurrent requests
         self._lock = asyncio.Lock()
 
         # Mark deployment as ready for serving requests
         self.ready = True
+        total_time = (time.time() - t0) * 1000
         logger.info(
-            "Embedding ready model=%s device=%s dtype=%s tok_ms=%.2f model_ms=%.2f",
-            self.model_name,
-            self.device,
-            str(self.dtype),
-            t_tok,
-            t_model,
+            f"✅ EmbeddingDeployment ready! "
+            f"Total initialization: {total_time:.2f}ms "
+            f"(tokenizer: {t_tok:.2f}ms, model: {t_model:.2f}ms)"
         )
 
     async def is_ready(self) -> bool:

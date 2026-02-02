@@ -1,0 +1,131 @@
+---
+# Inference Deployment: Ray Serve for ML inference
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: inference
+    version: "1.0"
+spec:
+  replicas: 1  # Will be scaled by HPA or Ray autoscaler
+  selector:
+    matchLabels:
+      app: scalestyle
+      component: inference
+  template:
+    metadata:
+      labels:
+        app: scalestyle
+        component: inference
+        version: "1.0"
+      annotations:
+        # Prometheus scraping annotations
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      # P1-1 Fix: Security context for HF cache write permissions
+      securityContext:
+        fsGroup: 1000  # scalestyle group from Dockerfile
+      
+      containers:
+      - name: inference
+        # Update with your Docker Hub image
+        image: your-dockerhub-username/scalestyle-inference:latest
+        imagePullPolicy: Always
+        
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        - name: dashboard
+          containerPort: 8265
+          protocol: TCP
+        
+        # Environment variables from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: scalestyle-config
+        
+        # Resource requests and limits
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "2000m"
+            memory: "4Gi"
+        
+        # Health checks
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8000
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 5
+        
+        # Startup probe for slow-starting Ray Serve
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 30  # Allow up to 5 minutes for startup
+        
+        # P1-1 Fix: Volume mounts for HuggingFace cache (standardized path)
+        volumeMounts:
+        - name: hf-cache
+          mountPath: /cache/huggingface
+      
+      volumes:
+      - name: hf-cache
+        emptyDir:
+          sizeLimit: 10Gi
+
+---
+# Inference Service: ClusterIP for internal access
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: inference
+spec:
+  type: ClusterIP
+  selector:
+    app: scalestyle
+    component: inference
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+    protocol: TCP
+  - name: dashboard
+    port: 8265
+    targetPort: 8265
+    protocol: TCP
+  sessionAffinity: None

@@ -12,44 +12,24 @@ applications:
     route_prefix: /
     runtime_env:
       env_vars:
-        # Redis configuration
-        REDIS_HOST: "localhost"
-        REDIS_PORT: "6379"
-        POPULARITY_KEY: "global:popular"
+        # ========================================
+        # P1 Fix: Removed duplicate configs that are already defined in docker-compose.yml
+        # Single source of truth: docker-compose.yml controls infrastructure configs
+        # Keep only Ray Serve-specific and generation-specific configs here
+        # ========================================
         
-        # Milvus configuration
-        MILVUS_HOST: "localhost"
-        MILVUS_PORT: "19530"
-        MILVUS_COLLECTION: "scale_style_bge_v2"
-        
-        # Embedding configuration
-        EMBEDDING_MODEL: "BAAI/bge-large-en-v1.5"
-        EMBEDDING_MAX_LEN: "512"
+        # Embedding configuration (Ray Serve specific)
         EMBEDDING_NUM_CPUS: "2"
-        EMBEDDING_NUM_GPUS: "0"
         EMBEDDING_QUERY_PREFIX: "Represent this sentence for searching relevant passages:"
-        EMBEDDING_TIMEOUT_MS: "1200"
         
-        # Retrieval configuration
-        RECALL_K: "100"
-        RETRIEVAL_TIMEOUT_MS: "800"
-        
-        # Reranker configuration
-        RERANKER_ENABLED: "1"
-        RERANKER_MODEL: "BAAI/bge-reranker-base"
-        RERANKER_DEVICE: "cpu"
-        RERANKER_BATCH_SIZE: "16"
-        RERANKER_MAX_DOCS: "100"
-        RERANKER_MODE: "cross-encoder"
-        RERANKER_TIMEOUT_MS: "1200"
-        RERANKER_WARMUP: "1"
-        
-        # A/B testing configuration
+        # A/B testing configuration (Ray Serve specific)
         BASE_FLOW_MODE: "vector"  # Options: vector, popularity
         
-        # Generation configuration
-        GENERATION_ENABLED: "0"  # Default off until model is loaded
-        GENERATION_TIMEOUT_MS: "600"
+        # Generation configuration (Optional feature, not in docker-compose)
+        # P0-1 Fix: Default enabled with template mode (no model download needed)
+        GENERATION_ENABLED: "1"  # Week 3: Default on for AI recommendation reason
+        GENERATION_MODE: "template"  # Options: template (fast), llm (requires model)
+        GENERATION_TIMEOUT_MS: "500"  # Week 3: Reduced from 600ms to 500ms
         GENERATION_FLOW: "smart"  # Options: smart (only SEARCH), all (always)
         GENERATION_MODEL: "Qwen/Qwen2-1.5B-Instruct"
         GENERATION_DEVICE: "auto"  # auto, cpu, cuda, mps
@@ -60,9 +40,16 @@ applications:
         GENERATION_DTYPE: "float16"
         GENERATION_WARMUP: "1"
         
-        # Ray/HuggingFace configuration
-        RAY_SERVE_RUN_SYNC_IN_THREADPOOL: "1"
-        TOKENIZERS_PARALLELISM: "false"
-        HF_HOME: "/tmp/hf"  # Model cache directory
+        # ========================================
+        # NOTE: The following are controlled by docker-compose.yml:
+        # - REDIS_HOST, REDIS_PORT, POPULARITY_KEY
+        # - MILVUS_HOST, MILVUS_PORT, MILVUS_COLLECTION
+        # - EMBEDDING_MODEL, EMBEDDING_MAX_LEN, EMBEDDING_NUM_GPUS, EMBEDDING_TIMEOUT_MS
+        # - RECALL_K, RETRIEVAL_TIMEOUT_MS
+        # - RERANKER_* (all reranker configs)
+        # - HF_HOME, TRANSFORMERS_CACHE
+        # - RAY_SERVE_RUN_SYNC_IN_THREADPOOL, TOKENIZERS_PARALLELISM
+        # - OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME
+        # ========================================
+        # to ensure model cache persists across container restarts.
         HF_HUB_DISABLE_TELEMETRY: "1"
-        TRANSFORMERS_CACHE: "/tmp/hf/transformers"

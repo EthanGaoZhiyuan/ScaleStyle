@@ -16,6 +16,8 @@ services:
       - METADATA_PATH=/app/data/product_metadata.json
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      # OpenTelemetry configuration
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
     volumes:
       - ./data-pipeline/data/processed:/app/data
     depends_on:
@@ -66,19 +68,32 @@ services:
       - RAY_SERVE_RUN_SYNC_IN_THREADPOOL=1
       - HF_HUB_DISABLE_TELEMETRY=1
       - TOKENIZERS_PARALLELISM=false
+      # ----- OpenTelemetry Tracing -----
+      # P1 Fix: Unified format with scheme (consistent with gateway)
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_SERVICE_NAME=inference-service
+      # ----- Ray gRPC Configuration (Fix SSL handshake errors) -----
+      - GRPC_ENABLE_FORK_SUPPORT=1
+      - RAY_grpc_enable_http_proxy=0
+      - RAY_BACKEND_LOG_LEVEL=warning
+      - RAY_tls_server_cert=""
+      - RAY_tls_server_key=""
+      - RAY_tls_ca_cert=""
     volumes:
       - ./data-pipeline/data/processed/top_items_parquet:/app/data/top_items_parquet
       - hf_cache:/cache/huggingface
     depends_on:
       milvus:
-        condition: service_started
+        condition: service_healthy  # Wait for Milvus health check to pass
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz').read()"]
-      interval: 10s
-      timeout: 3s
-      retries: 30
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz').read()"]
+      interval: 15s
+      timeout: 10s
+      retries: 50  # Increased retry count (from 30 to 50)
+      start_period: 120s  # Allow more time for model loading (from 60s to 120s)
+    restart: unless-stopped
     networks:
       - scalestyle-net
 
@@ -111,16 +126,12 @@ services:
       - ETCD_QUOTA_BACKEND_BYTES=8589934592
       - ETCD_SNAPSHOT_COUNT=50000
     volumes:
-      - etcd_data:/etcd-data
+      - etcd_data:/etcd
     command: >
       etcd
       -advertise-client-urls=http://etcd:2379
       -listen-client-urls=http://0.0.0.0:2379
       --data-dir /etcd
-      --auto-compaction-mode=revision
-      --auto-compaction-retention=1000
-      --quota-backend-bytes=8589934592
-      --snapshot-count=50000
     networks:
       - scalestyle-net
   # ==========================================
@@ -143,6 +154,14 @@ services:
     depends_on:
       - etcd
       - minio
+    # Production-grade health check: ensure Milvus is truly ready
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s  # Give Milvus 30 seconds to start
+    restart: unless-stopped
     networks:
       - scalestyle-net
   # ==========================================
@@ -175,6 +194,69 @@ services:
     networks:
       - scalestyle-net
 
+  # ==========================================
+  # 8. Jaeger (Distributed Tracing)
+  # ==========================================
+  jaeger:
+    container_name: scalestyle-jaeger
+    image: jaegertracing/all-in-one:1.55
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317:4317"    # OTLP gRPC receiver
+      - "4318:4318"    # OTLP HTTP receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - scalestyle-net
+
+  # ==========================================
+  # 9. Prometheus (Metrics Collection)
+  # ==========================================
+  prometheus:
+    container_name: scalestyle-prometheus
+    image: prom/prometheus:v2.51.2
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    depends_on:
+      - gateway-service
+      - inference-service
+    networks:
+      - scalestyle-net
+
+  # ==========================================
+  # 10. Grafana (Metrics Visualization)
+  # ==========================================
+  grafana:
+    container_name: scalestyle-grafana
+    image: grafana/grafana:10.4.2
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # Auto-provision datasources and dashboards
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+    volumes:
+      - grafana_data:/var/lib/grafana
+      # P2 Fix: Mount provisioning configurations as read-only to prevent accidental modification
+      - ./observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./observability/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      # Mount dashboard JSON files as read-only
+      - ./observability/grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - scalestyle-net
+
 # Define volumes (Persist MinIO data)
 volumes:
   minio_data:
@@ -182,6 +264,8 @@ volumes:
   milvus_data:
   redis_data:
   hf_cache:
+  prometheus_data:
+  grafana_data:
 
 # Define networks (Enable communication between containers)
 networks:
