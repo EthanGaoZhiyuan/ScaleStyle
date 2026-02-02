@@ -146,7 +146,6 @@ public class ProductCacheService {
                     .itemId(articleId)
                     .name(getHashValue(hash, "product_type_name", "Unknown Product"))
                     .category(getHashValue(hash, "department_name", "General"))
-                    .color(getHashValue(hash, "colour_group_name", ""))
                     .description(getHashValue(hash, "detail_desc", ""))
                     .price(parsePrice(getHashValue(hash, "price", "0")))
                     .imgUrl(getHashValue(hash, "image_url", "https://via.placeholder.com/150"))
