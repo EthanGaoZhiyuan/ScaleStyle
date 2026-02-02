@@ -702,7 +702,7 @@ class IngressDeployment:
                 _record_metrics(intent="BROWSE", flow=flow, status="success")
                 return _build_response(results, route)
 
-            # P1: Base Flow Mode - support pure popularity baseline for A/B test control group
+            # Base Flow Mode - support pure popularity baseline for A/B test control group
             # When BASE_FLOW_MODE=popularity and flow=base, skip embedding/retrieval entirely
             base_flow_mode = ABTestConfig.BASE_FLOW_MODE
             if flow == "base" and base_flow_mode == "popularity":
@@ -852,7 +852,7 @@ class IngressDeployment:
                         raise
 
                 # Fallback to popularity if all candidates filtered out
-                # P0-4 Fix: Initialize generation_ms to avoid undefined in fallback path
+                # Initialize generation_ms to avoid undefined in fallback path
                 generation_ms = None
 
                 if not results:
@@ -1029,7 +1029,7 @@ class IngressDeployment:
                                 )  # Extract actual mode (template/llm)
 
                                 # Week 3: Add reason and reason_source at root level
-                                # P0 Fix: Use actual mode instead of hardcoding "llm"
+                                # Use actual mode instead of hardcoding "llm"
                                 results[0]["reason"] = reason_value
                                 results[0]["reason_source"] = (
                                     mode if reason_value else "fallback"
@@ -1044,7 +1044,7 @@ class IngressDeployment:
                                 span.set_attribute("mode", mode)
                                 span.set_attribute("fallback", not bool(reason_value))
 
-                                # P0-1 Fix: Correct contract_dbg if reason was generated
+                                # Fix: Correct contract_dbg if reason was generated
                                 if reason_value and contract_dbg_cache:
                                     missing_by_field = contract_dbg_cache.get(
                                         "missing_by_field", {}

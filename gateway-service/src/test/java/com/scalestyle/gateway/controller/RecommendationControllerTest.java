@@ -38,7 +38,7 @@ class RecommendationControllerTest {
                 .imgUrl("http://mock.url/img.jpg")
                 .build();
 
-        when(recommendationService.search(eq("black jeans"), nullable(String.class), eq(5), eq(false)))
+        when(recommendationService.search(eq("black jeans"), nullable(String.class), nullable(String.class), eq(5), eq(false)))
                 .thenReturn(List.of(mockDetail));
 
         mockMvc.perform(get("/api/recommendation/search")
@@ -65,7 +65,7 @@ class RecommendationControllerTest {
     @Test
     @DisplayName("GET /api/recommendation/search - Service throws exception")
     void testSearchServiceError() throws Exception {
-        when(recommendationService.search(anyString(), any(), anyInt(), anyBoolean()))
+        when(recommendationService.search(anyString(), any(), any(), anyInt(), anyBoolean()))
                 .thenThrow(new RuntimeException("Inference service call failed"));
 
         mockMvc.perform(get("/api/recommendation/search")
