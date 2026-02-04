@@ -1,0 +1,21 @@
+---
+# EKS init-job: Full mode (load both Redis and Milvus)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-init
+spec:
+  template:
+    spec:
+      containers:
+      - name: data-loader
+        args:
+        - "--no-verify"  # Keep for speed
+        # No --skip-milvus flag = full initialization
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "2"
+            memory: "4Gi"

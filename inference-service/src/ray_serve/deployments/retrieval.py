@@ -125,7 +125,6 @@ class RetrievalDeployment:
     def _search_impl(
         self,
         vector: List[float],
-        top_k: int = 10,
         candidate_k: int = 200,
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
@@ -137,7 +136,6 @@ class RetrievalDeployment:
 
         Args:
             vector: Query embedding vector for similarity search.
-            top_k: Number of top results to return (not currently used in return).
             candidate_k: Maximum number of candidates to retrieve from Milvus.
             filters: Optional filter criteria (color, price, etc.).
 
@@ -204,7 +202,6 @@ class RetrievalDeployment:
     async def search(
         self,
         vector: List[float],
-        top_k: int = 10,
         candidate_k: int = 200,
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
@@ -213,7 +210,6 @@ class RetrievalDeployment:
 
         Args:
             vector: Query embedding vector for similarity search.
-            top_k: Number of top results to return (not currently used in return).
             candidate_k: Maximum number of candidates to retrieve from Milvus.
             filters: Optional filter criteria (color, price, etc.).
 
@@ -232,5 +228,5 @@ class RetrievalDeployment:
         # Run I/O-intensive Milvus search in thread pool with lock for safety
         async with self._lock:
             return await asyncio.to_thread(
-                self._search_impl, vector, top_k, candidate_k, filters
+                self._search_impl, vector, candidate_k, filters
             )

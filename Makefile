@@ -39,27 +39,24 @@ k8s-setup: ## Setup K8s prerequisites (metrics-server, ingress-nginx)
 
 ##@ Core Deployment
 
-k8s-apply: ## Deploy all K8s resources (namespace, configmap, services)
-	@echo "$(GREEN)Deploying ScaleStyle to Kubernetes...$(NC)"
-	@kubectl apply -f infrastructure/k8s/00-namespace.yaml
-	@kubectl apply -f infrastructure/k8s/10-configmap.yaml
-	@kubectl apply -f infrastructure/k8s/20-redis.yaml
-	@kubectl apply -f infrastructure/k8s/30-inference.yaml
-	@kubectl apply -f infrastructure/k8s/40-gateway.yaml
-	@kubectl apply -f infrastructure/k8s/55-jaeger.yaml
-	@kubectl apply -f infrastructure/k8s/50-ingress.yaml
-	@echo "$(GREEN)✓ Core services deployed (including Jaeger tracing)$(NC)"
-	@echo "$(YELLOW)Run 'make k8s-status' to check pod status$(NC)"
+deploy-minikube: ## Deploy to Minikube (local development)
+	@echo "$(GREEN)Deploying to Minikube...$(NC)"
+	@./infrastructure/k8s/deploy.sh minikube deploy
 
-k8s-delete: ## Delete all K8s resources
-	@echo "$(RED)Deleting ScaleStyle from Kubernetes...$(NC)"
-	@kubectl delete -f infrastructure/k8s/50-ingress.yaml --ignore-not-found=true
-	@kubectl delete -f infrastructure/k8s/40-gateway.yaml --ignore-not-found=true
-	@kubectl delete -f infrastructure/k8s/30-inference.yaml --ignore-not-found=true
-	@kubectl delete -f infrastructure/k8s/20-redis.yaml --ignore-not-found=true
-	@kubectl delete -f infrastructure/k8s/10-configmap.yaml --ignore-not-found=true
-	@# Keep namespace for next deployment
-	@echo "$(GREEN)✓ Services deleted (namespace preserved)$(NC)"
+deploy-eks: ## Deploy to EKS (AWS production)
+	@echo "$(GREEN)Deploying to EKS...$(NC)"
+	@./infrastructure/k8s/deploy.sh eks deploy
+
+k8s-apply: deploy-minikube ## Alias for deploy-minikube (backward compatibility)
+
+k8s-delete-minikube: ## Delete Minikube deployment
+	@echo "$(RED)Deleting Minikube deployment...$(NC)"
+	@./infrastructure/k8s/deploy.sh minikube delete
+
+k8s-delete-eks: ## Delete EKS deployment
+	@echo "$(RED)Deleting EKS deployment...$(NC)"
+	@./infrastructure/k8s/deploy.sh eks delete
+k8s-delete: k8s-delete-minikube ## Alias for k8s-delete-minikube (backward compatibility)
 
 k8s-status: ## Show status of all pods and services
 	@echo "$(GREEN)=== Namespace Status ===$(NC)"

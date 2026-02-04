@@ -58,10 +58,13 @@ class RerankerConfig:
         return val.strip().lower() in ("1", "true", "yes", "y", "on")
 
     ENABLED = _get_bool.__func__("RERANKER_ENABLED", True)
-    MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-base")
+    # Production Tip: Use MiniLM for CPU/Low-latency, BGE for Max Accuracy (requires GPU)
+    MODEL = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
     DEVICE = os.getenv("RERANKER_DEVICE", "cpu")
     BATCH_SIZE = int(os.getenv("RERANKER_BATCH_SIZE", "16"))
-    MAX_DOCS = int(os.getenv("RERANKER_MAX_DOCS", "100"))
+    MAX_DOCS = int(
+        os.getenv("RERANKER_MAX_DOCS", "50")
+    )  # Rerank top 50 is usually enough
     MODE = os.getenv("RERANKER_MODE", "cross-encoder")
     TIMEOUT_MS = int(os.getenv("RERANKER_TIMEOUT_MS", "1200"))
     WARMUP = _get_bool.__func__("RERANKER_WARMUP", True)

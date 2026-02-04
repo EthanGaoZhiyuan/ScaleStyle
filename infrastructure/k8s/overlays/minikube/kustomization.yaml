@@ -1,0 +1,51 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Minikube-specific configuration
+# Local development environment with minimal resource requirements
+
+bases:
+  - ../../base
+
+namePrefix: local-
+
+# Minikube-specific patches
+patchesStrategicMerge:
+  - ingress-minikube.yaml
+  - resource-limits-small.yaml
+  - init-job-fast.yaml  # Fast init (skip Milvus)
+
+# Optional: Inference HPA (only if not using Ray autoscaling)
+resources:
+  - inference-hpa.yaml
+
+# Use local Docker images (or Docker Hub for simplicity)
+images:
+  - name: scalestyle-gateway
+    newName: your-dockerhub-username/scalestyle-gateway
+    newTag: latest
+  - name: scalestyle-inference
+    newName: your-dockerhub-username/scalestyle-inference
+    newTag: latest
+  - name: scalestyle-data-init
+    newName: your-dockerhub-username/scalestyle-data-init
+    newTag: latest
+
+# Minikube uses hostPath for storage
+configMapGenerator:
+  - name: env-config
+    literals:
+      - ENVIRONMENT=minikube
+      - REDIS_HOST=redis.scalestyle.svc.cluster.local
+      - MILVUS_HOST=milvus.scalestyle.svc.cluster.local
+      - INFERENCE_BASE_URL=http://inference.scalestyle.svc.cluster.local:8000
+
+# Enable port-forward friendly services
+patches:
+  - target:
+      kind: Service
+      name: gateway
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: NodePort

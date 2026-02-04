@@ -37,6 +37,7 @@ from src.ray_serve.deployments.retrieval import RetrievalDeployment
 from src.ray_serve.deployments.popularity import PopularityDeployment
 from src.ray_serve.deployments.reranker import RerankerDeployment
 from src.ray_serve.deployments.generation import GenerationDeployment
+from src.ray_serve.deployments.clip_search import CLIPSearchDeployment
 from src.config import (
     RetrievalConfig,
     EmbeddingConfig,
@@ -426,6 +427,7 @@ class IngressDeployment:
         popularity_handle: DeploymentHandle,
         reranker_handle: DeploymentHandle,
         generation_handle: DeploymentHandle,
+        clip_search_handle: Optional[DeploymentHandle] = None,
     ):
         """
         Initialize the ingress deployment with handles to other deployments.
@@ -437,6 +439,7 @@ class IngressDeployment:
             popularity_handle: Handle to popularity deployment for fallback recommendations.
             reranker_handle: Handle to reranker deployment for result reordering.
             generation_handle: Handle to generation deployment for recommendation explanations.
+            clip_search_handle: Optional handle to CLIP search deployment for image-based search.
         """
         # Store handles to downstream deployments
         self.router_handle = router_handle
@@ -445,6 +448,7 @@ class IngressDeployment:
         self.popularity_handle = popularity_handle
         self.reranker_handle = reranker_handle
         self.generation_handle = generation_handle
+        self.clip_search_handle = clip_search_handle
 
         # Don't initialize Redis here - it causes serialization issues
         # Will be lazily initialized in property getter
@@ -532,6 +536,10 @@ class IngressDeployment:
                 except Exception as e:
                     logger.exception("Search request failed: %s", e)
                     return JSONResponse({"error": str(e)}, status_code=500)
+
+            # CLIP image search endpoint (POST /search/image)
+            if request.method == "POST" and path == "/search/image":
+                return await self._image_search_handler(request)
 
             # Unknown path
             return JSONResponse({"error": "Not found", "path": path}, status_code=404)
@@ -779,7 +787,6 @@ class IngressDeployment:
                         candidates = await asyncio.wait_for(
                             self.retrieval_handle.search.remote(
                                 vector,
-                                top_k=req.k,
                                 candidate_k=candidate_k,
                                 filters=filters,
                             ),
@@ -1199,6 +1206,139 @@ class IngressDeployment:
 
             return resp
 
+    async def _image_search_handler(self, request: Request) -> JSONResponse:
+        """
+        Handle CLIP-based image search requests.
+
+        Request body:
+        {
+            "image_url": "https://example.com/image.jpg",  # OR
+            "image_base64": "iVBORw0KGgo...",
+            "k": 10
+        }
+
+        Response:
+        {
+            "items": [
+                {"article_id": "12345", "score": 0.95, "meta": {...}},
+                ...
+            ],
+            "k": 10,
+            "query_time_ms": 234,
+            "status": "success"
+        }
+        """
+        t0 = time.time()
+
+        try:
+            # Check if CLIP is available
+            if self.clip_search_handle is None:
+                return JSONResponse(
+                    {"error": "CLIP search not available", "status": "unavailable"},
+                    status_code=503,
+                )
+
+            # Parse request
+            body = await request.json()
+            image_url = body.get("image_url")
+            image_base64 = body.get("image_base64")
+            k = body.get("k", 10)
+
+            # Validate input
+            if not image_url and not image_base64:
+                return JSONResponse(
+                    {
+                        "error": "Must provide either image_url or image_base64",
+                        "status": "error",
+                    },
+                    status_code=400,
+                )
+
+            # Call CLIP search deployment
+            clip_request = {
+                "image_url": image_url,
+                "image_base64": image_base64,
+                "k": k * 2,  # Request more for filtering
+            }
+
+            clip_response = await self.clip_search_handle.remote(clip_request)
+
+            # Check for errors
+            if clip_response.get("status") == "error":
+                return JSONResponse(
+                    {
+                        "error": clip_response.get("error", "CLIP search failed"),
+                        "status": "error",
+                    },
+                    status_code=500,
+                )
+
+            # Get article IDs from CLIP response
+            clip_items = clip_response.get("items", [])
+
+            # Enrich with metadata from Redis
+            results = []
+            for item in clip_items[:k]:
+                aid = item["item_id"]
+                score = item.get("score", 0.0)
+
+                # Get metadata from Redis
+                meta_key = f"item:{aid}"
+                try:
+                    raw_meta = await asyncio.to_thread(self.redis.hgetall, meta_key)
+                    if raw_meta:
+                        # Decode bytes to strings
+                        raw_meta = {
+                            k.decode() if isinstance(k, bytes) else k: (
+                                v.decode() if isinstance(v, bytes) else v
+                            )
+                            for k, v in raw_meta.items()
+                        }
+                        meta = _normalize_meta(aid, raw_meta)
+                    else:
+                        # Fallback if no metadata
+                        meta = {
+                            "title": f"Product {aid}",
+                            "image_url": _local_image_url(aid),
+                            "dept": "",
+                            "desc": "",
+                            "price": None,
+                            "color": "",
+                            "reason": "",
+                        }
+                except Exception as e:
+                    logger.warning(f"Failed to fetch metadata for {aid}: {e}")
+                    meta = {
+                        "title": f"Product {aid}",
+                        "image_url": _local_image_url(aid),
+                        "dept": "",
+                        "desc": "",
+                        "price": None,
+                        "color": "",
+                        "reason": "",
+                    }
+
+                results.append({"article_id": aid, "score": score, "meta": meta})
+
+            # Normalize contract
+            results, contract_debug = _contract_normalize(results, k)
+
+            total_ms = int((time.time() - t0) * 1000)
+
+            return JSONResponse(
+                {
+                    "items": results,
+                    "k": k,
+                    "query_time_ms": total_ms,
+                    "contract_debug": contract_debug,
+                    "status": "success",
+                }
+            )
+
+        except Exception as e:
+            logger.exception("Image search failed: %s", e)
+            return JSONResponse({"error": str(e), "status": "error"}, status_code=500)
+
 
 # Bind individual deployment nodes for the Ray Serve application graph
 router_node = RouterDeployment.bind()
@@ -1207,6 +1347,7 @@ retrieval_node = RetrievalDeployment.bind()
 popularity_node = PopularityDeployment.bind()
 reranker_node = RerankerDeployment.bind()
 generation_node = GenerationDeployment.bind()
+clip_search_node = CLIPSearchDeployment.bind()
 
 # Bind ingress deployment with all dependency handles
 # This creates the complete application graph for Ray Serve
@@ -1217,4 +1358,5 @@ ingress_app = IngressDeployment.bind(
     popularity_node,
     reranker_node,
     generation_node,
+    clip_search_node,
 )

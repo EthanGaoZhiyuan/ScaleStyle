@@ -1,0 +1,33 @@
+---
+# Milvus PersistentVolumeClaim with EBS backend
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: milvus-data
+  namespace: scalestyle
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: scalestyle-ebs
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+# Patch Milvus deployment to use PVC
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: milvus
+spec:
+  template:
+    spec:
+      containers:
+      - name: milvus
+        volumeMounts:
+        - name: milvus-data
+          mountPath: /var/lib/milvus
+      volumes:
+      - name: milvus-data
+        persistentVolumeClaim:
+          claimName: milvus-data

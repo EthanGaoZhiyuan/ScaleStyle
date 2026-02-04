@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# ScaleStyle Base Configuration
+# Contains all environment-agnostic Kubernetes resources
+
+namespace: scalestyle
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - redis.yaml
+  - inference.yaml
+  - gateway.yaml
+  - ingress.yaml
+  - jaeger.yaml
+  - init-job.yaml
+  - gateway-hpa.yaml
+
+# Common labels applied to all resources
+commonLabels:
+  app: scalestyle
+  managed-by: kustomize
+
+# Images that will be overridden in overlays
+images:
+  - name: scalestyle-gateway
+    newName: your-dockerhub-username/scalestyle-gateway
+    newTag: latest
+  - name: scalestyle-inference
+    newName: your-dockerhub-username/scalestyle-inference
+    newTag: latest
+  - name: scalestyle-data-init
+    newName: your-dockerhub-username/scalestyle-data-init
+    newTag: latest

@@ -1,0 +1,210 @@
+---
+# RayCluster: Advanced Ray autoscaling with KubeRay Operator
+# This is an OPTIONAL advanced configuration for Week 4
+# Provides better Ray-native autoscaling than standard K8s HPA
+
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: scalestyle-ray-cluster
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: ray-cluster
+spec:
+  # Ray version
+  rayVersion: '2.9.0'
+  
+  # Enable autoscaling
+  enableInTreeAutoscaling: true
+  
+  # Autoscaler options
+  autoscalerOptions:
+    # Upscaling speed
+    upscalingSpeed: 1.0
+    # Idle timeout in seconds
+    idleTimeoutSeconds: 60
+    # Image for autoscaler
+    image: rayproject/ray:2.9.0
+    # Resources for autoscaler sidecar
+    resources:
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+  
+  # Head node configuration (1 replica, not autoscaled)
+  headGroupSpec:
+    rayStartParams:
+      dashboard-host: '0.0.0.0'
+      block: 'true'
+    
+    template:
+      metadata:
+        labels:
+          app: scalestyle
+          component: ray-head
+          ray.io/node-type: head
+      spec:
+        containers:
+        - name: ray-head
+          image: your-dockerhub-username/scalestyle-inference:latest
+          imagePullPolicy: Always
+          
+          ports:
+          - containerPort: 6379
+            name: gcs-server
+          - containerPort: 8265
+            name: dashboard
+          - containerPort: 10001
+            name: client
+          - containerPort: 8000
+            name: serve
+          
+          # Environment variables
+          envFrom:
+          - configMapRef:
+              name: scalestyle-config
+          
+          # Resources
+          resources:
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+          
+          # Volume mounts
+          volumeMounts:
+          - name: hf-cache
+            mountPath: /tmp/huggingface
+        
+        volumes:
+        - name: hf-cache
+          emptyDir:
+            sizeLimit: 10Gi
+  
+  # Worker node configuration (autoscaled)
+  workerGroupSpecs:
+  - replicas: 1  # Initial replicas
+    minReplicas: 1
+    maxReplicas: 5
+    groupName: worker-group
+    
+    rayStartParams:
+      block: 'true'
+    
+    template:
+      metadata:
+        labels:
+          app: scalestyle
+          component: ray-worker
+          ray.io/node-type: worker
+      spec:
+        containers:
+        - name: ray-worker
+          image: your-dockerhub-username/scalestyle-inference:latest
+          imagePullPolicy: Always
+          
+          # Environment variables
+          envFrom:
+          - configMapRef:
+              name: scalestyle-config
+          
+          # Resources
+          resources:
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+          
+          # Volume mounts
+          volumeMounts:
+          - name: hf-cache
+            mountPath: /tmp/huggingface
+        
+        volumes:
+        - name: hf-cache
+          emptyDir:
+            sizeLimit: 10Gi
+
+---
+# RayService: Exposes Ray Serve deployments
+# This manages the Ray Serve application lifecycle
+apiVersion: ray.io/v1
+kind: RayService
+metadata:
+  name: scalestyle-ray-service
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: ray-service
+spec:
+  serviceUnhealthySecondThreshold: 300
+  deploymentUnhealthySecondThreshold: 300
+  
+  # Reference to RayCluster
+  rayClusterConfig:
+    rayVersion: '2.9.0'
+    headGroupSpec:
+      # Same as RayCluster headGroupSpec above
+      rayStartParams:
+        dashboard-host: '0.0.0.0'
+      template:
+        spec:
+          containers:
+          - name: ray-head
+            image: your-dockerhub-username/scalestyle-inference:latest
+            resources:
+              limits:
+                cpu: "2"
+                memory: "4Gi"
+              requests:
+                cpu: "500m"
+                memory: "1Gi"
+    
+    workerGroupSpecs:
+    - replicas: 1
+      minReplicas: 1
+      maxReplicas: 5
+      groupName: worker-group
+      rayStartParams: {}
+      template:
+        spec:
+          containers:
+          - name: ray-worker
+            image: your-dockerhub-username/scalestyle-inference:latest
+            resources:
+              limits:
+                cpu: "2"
+                memory: "4Gi"
+              requests:
+                cpu: "500m"
+                memory: "1Gi"
+  
+  # Ray Serve configuration
+  # Note: This RayService spec is for advanced autoscaling (optional)
+  # For basic deployment, use standard Deployment (30-inference.yaml)
+  serveConfigV2: |
+    applications:
+    - name: scalestyle
+      route_prefix: /
+      # Fixed: Points to actual IngressDeployment.bind() in ingress.py:1189
+      import_path: src.ray_serve.deployments.ingress:ingress_app
+      runtime_env:
+        working_dir: "."
+        env_vars:
+          PYTHONPATH: "/app"
+          HF_HOME: "/cache/huggingface"
+      deployments:
+      - name: IngressDeployment
+      - name: EmbeddingDeployment
+      - name: RetrievalDeployment
+      - name: PopularityDeployment
+      - name: GenerationDeployment
+      - name: RerankerDeployment

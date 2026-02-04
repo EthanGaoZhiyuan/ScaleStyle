@@ -93,7 +93,7 @@ class GenerationDeployment:
         self.enabled = GenerationConfig.ENABLED
         self.mode = GenerationConfig.MODE
 
-        # P0-2 Fix: Concurrency protection (prevent OOM under load)
+        # Concurrency protection (prevent OOM under load)
         max_concurrency = int(os.getenv("GENERATION_MAX_CONCURRENCY", "1"))
         self._semaphore = asyncio.Semaphore(max_concurrency)
         logger.info(f"Generation concurrency limit: {max_concurrency}")
@@ -123,7 +123,7 @@ class GenerationDeployment:
             "TRANSFORMERS_CACHE", os.path.join(hf_home, "transformers")
         )
 
-        # ---- config ---- (P0-1 Fix: Support dual naming compatibility GEN_* and GENERATION_*)
+        # ---- config ---- (Fix: Support dual naming compatibility GEN_* and GENERATION_*)
         self.model_name = (
             os.getenv("GENERATION_MODEL")
             or os.getenv("GEN_MODEL_NAME")
@@ -241,7 +241,7 @@ class GenerationDeployment:
                 pad_token_id=self.tokenizer.eos_token_id,
             )
 
-            # P0-2 Fix: Only decode the newly generated tokens (not the prompt)
+            # Only decode the newly generated tokens (not the prompt)
             input_len = inputs["input_ids"].shape[-1]
             gen_ids = out[0][input_len:]
             text = self.tokenizer.decode(gen_ids, skip_special_tokens=True).strip()
@@ -300,7 +300,7 @@ class GenerationDeployment:
 
         t0 = time.time()
 
-        # P0-1 Fix: Early return if disabled
+        # Early return if disabled
         if not self.enabled:
             return {
                 "reason": "",
@@ -308,9 +308,9 @@ class GenerationDeployment:
                 "mode": "disabled",
             }
 
-        # P0-2 Fix: Concurrency protection - limit concurrent generations
+        # Concurrency protection - limit concurrent generations
         async with self._semaphore:
-            # P0-1 Fix: Template mode - lightweight reason
+            # Template mode - lightweight reason
             if self.mode == "template":
                 try:
                     reason = self._template_reason(q, item)
@@ -328,10 +328,10 @@ class GenerationDeployment:
                         "error": str(e),
                     }
 
-            # P0-1 Fix: LLM mode - heavy inference
+            # LLM mode - heavy inference
             try:
                 prompt = self._build_prompt(q, item)
-                # P0-2 Fix: Offload heavy computation to thread to avoid blocking asyncio loop
+                # Offload heavy computation to thread to avoid blocking asyncio loop
                 raw = await asyncio.to_thread(self._generate_text, prompt)
                 reason = _first_sentence(raw)
                 gen_ms = (time.time() - t0) * 1000

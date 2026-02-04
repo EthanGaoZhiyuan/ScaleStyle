@@ -1,0 +1,33 @@
+---
+# Redis PersistentVolumeClaim with EBS backend
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: scalestyle
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: scalestyle-ebs
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+# Patch Redis deployment to use PVC
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+spec:
+  template:
+    spec:
+      containers:
+      - name: redis
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: redis-data

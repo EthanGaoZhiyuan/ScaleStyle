@@ -14,6 +14,7 @@ import asyncio
 from typing import List, Dict, Any
 
 from ray import serve
+from src.config import RerankerConfig
 
 logger = logging.getLogger("scalestyle.reranker")
 
@@ -134,16 +135,28 @@ class RerankerDeployment:
         # Load configuration from environment (prioritize RERANKER_* names)
         self.enabled: bool = _env_bool("RERANKER_ENABLED", True)
         self.model_name: str = (
-            _env("RERANKER_MODEL", "RERANK_MODEL", default="stub") or "stub"
+            _env("RERANKER_MODEL", "RERANK_MODEL", default=RerankerConfig.MODEL)
+            or RerankerConfig.MODEL
         ).strip()
         self.batch_size: int = int(
-            _env("RERANKER_BATCH_SIZE", "RERANK_BATCH_SIZE", default="16") or "16"
+            _env(
+                "RERANKER_BATCH_SIZE",
+                "RERANK_BATCH_SIZE",
+                default=str(RerankerConfig.BATCH_SIZE),
+            )
+            or str(RerankerConfig.BATCH_SIZE)
         )
         self.max_docs: int = int(
-            _env("RERANKER_MAX_DOCS", "RERANK_MAX_DOCS", default="100") or "100"
+            _env(
+                "RERANKER_MAX_DOCS",
+                "RERANK_MAX_DOCS",
+                default=str(RerankerConfig.MAX_DOCS),
+            )
+            or str(RerankerConfig.MAX_DOCS)
         )
         self.device: str = (
-            _env("RERANKER_DEVICE", "RERANK_DEVICE", default="cpu") or "cpu"
+            _env("RERANKER_DEVICE", "RERANK_DEVICE", default=RerankerConfig.DEVICE)
+            or RerankerConfig.DEVICE
         ).strip()
         self.mode: str = (
             _env("RERANKER_MODE", "RERANK_MODE", default="auto") or "auto"
@@ -182,6 +195,11 @@ class RerankerDeployment:
             logger.info(
                 f"Reranker using model: {self.model_name} on device: {self.device}"
             )
+            if self.device == "cpu":
+                logger.warning(
+                    "⚠️  Running CrossEncoder on CPU. Latency may be high. Consider using GPU or a smaller model (MiniLM)."
+                )
+
         except Exception as e:
             logger.error(
                 f"Failed to load model {self.model_name}. Falling back to stub model. Error: {e}"

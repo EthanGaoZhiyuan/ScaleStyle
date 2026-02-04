@@ -1,0 +1,63 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# EKS-specific configuration
+# Production-ready AWS deployment with ALB, EBS, and IRSA
+
+bases:
+  - ../../base
+
+namePrefix: prod-
+
+# EKS-specific resources
+resources:
+  - ingress-alb.yaml
+  - storage-class-ebs.yaml
+  - service-account-irsa.yaml
+  - redis-pvc.yaml
+  - milvus-pvc.yaml
+  - raycluster.yaml  # Optional: Advanced Ray autoscaling
+
+# EKS-specific patches
+patchesStrategicMerge:
+  - resource-limits-production.yaml
+  - replicas-production.yaml
+  - init-job-full.yaml  # Full init (load Milvus)
+
+# Use ECR images (or Docker Hub)
+images:
+  - name: scalestyle-gateway
+    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/scalestyle-gateway
+    newTag: latest
+  - name: scalestyle-inference
+    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/scalestyle-inference
+    newTag: latest
+  - name: scalestyle-data-init
+    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/scalestyle-data-init
+    newTag: latest
+
+# EKS environment configuration
+configMapGenerator:
+  - name: env-config
+    literals:
+      - ENVIRONMENT=eks-production
+      - REDIS_HOST=redis.scalestyle.svc.cluster.local
+      - MILVUS_HOST=milvus.scalestyle.svc.cluster.local
+      - INFERENCE_BASE_URL=http://inference.scalestyle.svc.cluster.local:8000
+      - AWS_REGION=ap-southeast-2
+
+# Change gateway service to LoadBalancer (ALB will be created)
+patches:
+  - target:
+      kind: Service
+      name: gateway
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: LoadBalancer
+      - op: add
+        path: /metadata/annotations
+        value:
+          service.beta.kubernetes.io/aws-load-balancer-type: "external"
+          service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+          service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"

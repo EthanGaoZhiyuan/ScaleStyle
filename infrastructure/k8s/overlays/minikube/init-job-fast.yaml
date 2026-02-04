@@ -1,0 +1,14 @@
+---
+# Minikube init-job: Fast mode (skip Milvus for quick iteration)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-init
+spec:
+  template:
+    spec:
+      containers:
+      - name: data-loader
+        args:
+        - "--skip-milvus"  # Skip Milvus in local dev
+        - "--no-verify"    # Skip verification for speed

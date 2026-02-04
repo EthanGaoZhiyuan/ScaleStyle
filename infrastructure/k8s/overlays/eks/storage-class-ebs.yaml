@@ -1,0 +1,15 @@
+---
+# EBS-backed StorageClass for persistent volumes
+# Requires: EBS CSI Driver installed in cluster
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: scalestyle-ebs
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3  # General Purpose SSD (gp3 is cheaper than gp2)
+  fsType: ext4
+  encrypted: "true"
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Delete  # Change to Retain for production data

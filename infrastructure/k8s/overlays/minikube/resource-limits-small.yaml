@@ -1,0 +1,36 @@
+---
+# Smaller resource limits for local development
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+spec:
+  template:
+    spec:
+      containers:
+      - name: gateway
+        resources:
+          requests:
+            cpu: "200m"      # Increased to make 40% CPU easier to reach
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference
+spec:
+  template:
+    spec:
+      containers:
+      - name: inference
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "2"
+            memory: "2Gi"

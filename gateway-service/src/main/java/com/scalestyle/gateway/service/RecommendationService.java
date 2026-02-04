@@ -5,14 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scalestyle.gateway.dto.InferenceSearchRequest;
 import com.scalestyle.gateway.dto.InferenceSearchResponse;
 import com.scalestyle.gateway.dto.RecommendationDTO;
-import com.scalestyle.gateway.exception.InferenceServiceException;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -23,7 +21,6 @@ import org.springframework.web.client.RestTemplate;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
@@ -38,7 +35,7 @@ public class RecommendationService {
     private final RestTemplate restTemplate;
     private final String baseUrl;
     private final ProductCacheService productCacheService;
-    // P0-2 Fix: Use StringRedisTemplate + ObjectMapper instead of RedisTemplate<List>
+    // Use StringRedisTemplate + ObjectMapper instead of RedisTemplate<List>
     // to avoid Jackson default typing issues with generic collections
     private final org.springframework.data.redis.core.StringRedisTemplate recommendationCacheTemplate;
     private final ObjectMapper cacheObjectMapper;
@@ -135,7 +132,7 @@ public class RecommendationService {
                 .k(k)
                 .debug(debug)
                 .userId(userId)
-                .intent(intent)  // P0-1+: Pass intent to inference service
+                .intent(intent)
                 .build();
 
             HttpHeaders headers = new HttpHeaders();
