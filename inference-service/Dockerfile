@@ -1,7 +1,7 @@
 # ==========================================
 # Stage 1: Builder Stage
 # ==========================================
-FROM python:3.11-slim AS builder
+FROM python:3.10-slim AS builder
 
 WORKDIR /build
 
@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # ==========================================
 # Stage 2: Runtime Stage (Production-ready)
 # ==========================================
-FROM python:3.11-slim
+FROM python:3.10-slim
 
 # OCI Labels for traceability (best practice for production)
 ARG VCS_REF=unknown
@@ -73,6 +73,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/readyz || exit 1
 
-# Start Ray Serve with configuration
-CMD ["serve", "run", "src/ray_serve/config.yaml"]
+# Fix: Use config.yaml (GENERATION_ENABLED=1) to match ConfigMap settings
+# Use RAY_SERVE_CONFIG env var to override if needed (e.g., for minimal testing)
+ENV RAY_SERVE_CONFIG=src/ray_serve/config.yaml
+CMD ["sh", "-c", "serve run $RAY_SERVE_CONFIG"]
 

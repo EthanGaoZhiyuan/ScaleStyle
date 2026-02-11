@@ -1,5 +1,10 @@
 ---
-# Smaller resource limits for local development
+# Resource limits for local development (Docker Desktop / Minikube)
+# Optimized for Ray Serve deployments:
+#   ingress: 0.25, router: 0.1, embedding: 2, retrieval: 0.5,
+#   popularity: 0.1, reranker: 0.5, generation: 0.1
+#   Total: ~3.55 CPU + 1-2 CPU overhead = 5-6 CPU minimum
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,11 +16,11 @@ spec:
       - name: gateway
         resources:
           requests:
-            cpu: "200m"      # Increased to make 40% CPU easier to reach
-            memory: "256Mi"
-          limits:
-            cpu: "500m"
+            cpu: "500m"      # Higher for HPA trigger
             memory: "512Mi"
+          limits:
+            cpu: "1500m"     # Allow bursting
+            memory: "1Gi"
 
 ---
 apiVersion: apps/v1
@@ -23,14 +28,17 @@ kind: Deployment
 metadata:
   name: inference
 spec:
+  replicas: 1  # Local: single replica is fine
   template:
     spec:
       containers:
       - name: inference
         resources:
+          # Requests: Sufficient for all Ray deployments + overhead
+          # Ray needs: ~3.55 CPU for deployments + 1-2 CPU for Ray system
           requests:
-            cpu: "500m"
-            memory: "1Gi"
+            cpu: "5"         # Minimum for Ray Serve to schedule all deployments
+            memory: "6Gi"    # Embedding + Reranker models + overhead
           limits:
-            cpu: "2"
-            memory: "2Gi"
+            cpu: "8"         # Allow bursting during concurrent requests
+            memory: "10Gi"   # Prevent OOM during peak load

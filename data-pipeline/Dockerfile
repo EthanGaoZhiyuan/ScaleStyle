@@ -2,7 +2,7 @@
 # Data Init Image for Kubernetes Job
 # Pre-bakes all Python dependencies for fast initialization
 # ==========================================
-FROM python:3.11-slim
+FROM python:3.10-slim
 
 WORKDIR /app
 
@@ -17,6 +17,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy data initialization scripts
 COPY src/ ./src/
+
+# Copy processed data files (parquet with embeddings)
+COPY data/processed/ ./data/processed/
 
 # Create non-root user
 RUN useradd -m -u 1000 dataloader && \

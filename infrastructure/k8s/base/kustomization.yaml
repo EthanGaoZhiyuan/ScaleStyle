@@ -22,14 +22,4 @@ commonLabels:
   app: scalestyle
   managed-by: kustomize
 
-# Images that will be overridden in overlays
-images:
-  - name: scalestyle-gateway
-    newName: your-dockerhub-username/scalestyle-gateway
-    newTag: latest
-  - name: scalestyle-inference
-    newName: your-dockerhub-username/scalestyle-inference
-    newTag: latest
-  - name: scalestyle-data-init
-    newName: your-dockerhub-username/scalestyle-data-init
-    newTag: latest
+# Images will be configured in overlays (minikube/eks specific)

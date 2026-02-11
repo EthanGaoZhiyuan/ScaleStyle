@@ -11,7 +11,10 @@ from src.ray_serve.utils.milvus_client import create_milvus_client
 logger = logging.getLogger("scalestyle.retrieval")
 
 
-@serve.deployment
+@serve.deployment(
+    # Milvus query with moderate CPU needs
+    ray_actor_options={"num_cpus": 0.5}
+)
 class RetrievalDeployment:
     """
     Ray Serve deployment for vector-based retrieval using Milvus.
@@ -57,8 +60,9 @@ class RetrievalDeployment:
 
             logger.info(f"✅ Collection '{self.collection_name}' found")
 
-            # Initialize lock for thread safety during concurrent requests
-            self._lock = asyncio.Lock()
+            # Phase2 v2.3: Semaphore(8) allows concurrent Milvus searches (pymilvus is thread-safe)
+            # Previous Lock serialized all searches → major p99 bottleneck under c=10 load
+            self._search_semaphore = asyncio.Semaphore(8)
 
             # Load the collection into memory for search operations
             logger.info(f"Loading collection '{self.collection_name}' into memory...")
@@ -225,8 +229,8 @@ class RetrievalDeployment:
                 "Retrieval not ready (Milvus collection missing or not loaded)"
             )
 
-        # Run I/O-intensive Milvus search in thread pool with lock for safety
-        async with self._lock:
+        # Run I/O-intensive Milvus search in thread pool with controlled concurrency
+        async with self._search_semaphore:
             return await asyncio.to_thread(
                 self._search_impl, vector, candidate_k, filters
             )

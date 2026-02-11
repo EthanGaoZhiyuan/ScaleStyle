@@ -4,13 +4,11 @@ kind: Kustomization
 # EKS-specific configuration
 # Production-ready AWS deployment with ALB, EBS, and IRSA
 
-bases:
-  - ../../base
-
 namePrefix: prod-
 
-# EKS-specific resources
+# Base configuration
 resources:
+  - ../../base
   - ingress-alb.yaml
   - storage-class-ebs.yaml
   - service-account-irsa.yaml
@@ -36,18 +34,27 @@ images:
     newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/scalestyle-data-init
     newTag: latest
 
-# EKS environment configuration
-configMapGenerator:
-  - name: env-config
-    literals:
-      - ENVIRONMENT=eks-production
-      - REDIS_HOST=redis.scalestyle.svc.cluster.local
-      - MILVUS_HOST=milvus.scalestyle.svc.cluster.local
-      - INFERENCE_BASE_URL=http://inference.scalestyle.svc.cluster.local:8000
-      - AWS_REGION=ap-southeast-2
-
 # Change gateway service to LoadBalancer (ALB will be created)
 patches:
+  - target:
+      kind: ConfigMap
+      name: scalestyle-config
+    patch: |-
+      - op: add
+        path: /data/ENVIRONMENT
+        value: eks-production
+      - op: replace
+        path: /data/REDIS_HOST
+        value: redis.scalestyle.svc.cluster.local
+      - op: replace
+        path: /data/MILVUS_HOST
+        value: milvus.scalestyle.svc.cluster.local
+      - op: replace
+        path: /data/INFERENCE_BASE_URL
+        value: http://inference.scalestyle.svc.cluster.local:8000
+      - op: add
+        path: /data/AWS_REGION
+        value: ap-southeast-2
   - target:
       kind: Service
       name: gateway

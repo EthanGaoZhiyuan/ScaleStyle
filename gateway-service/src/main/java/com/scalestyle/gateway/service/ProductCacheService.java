@@ -39,7 +39,7 @@ import java.util.stream.Collectors;
 public class ProductCacheService {
 
     private static final String PRODUCT_KEY_PREFIX = "product:";
-    private static final String ITEM_KEY_PREFIX = "item:";  // P0-2 Fix: Support loader/inference Redis schema
+    private static final String ITEM_KEY_PREFIX = "item:";
     private static final String REDIS_WARMED_FLAG = "product:cache:warmed";
     
     private final RedisTemplate<String, RecommendationDTO> redisTemplate;
@@ -104,7 +104,7 @@ public class ProductCacheService {
     
     /**
      * Load from L2 (Redis). Called by Caffeine on L1 cache miss.
-     * P0-2 Fix: Support both product:<id> (serialized object) and item:<id> (hash) schemas
+     * Fix: Support both product:<id> (serialized object) and item:<id> (hash) schemas
      */
     private RecommendationDTO loadFromRedis(String paddedId) {
         // Try product:<id> first (original schema with serialized objects)
@@ -118,7 +118,7 @@ public class ProductCacheService {
                 return product;
             }
             
-            // P0-2 Fix: Fallback to item:<id> hash (loader/inference schema)
+            // Fix: Fallback to item:<id> hash (loader/inference schema)
             String itemKey = ITEM_KEY_PREFIX + paddedId;
             Map<Object, Object> itemHash = stringRedisTemplate.opsForHash().entries(itemKey);
             
@@ -137,14 +137,23 @@ public class ProductCacheService {
     }
     
     /**
-     * P0-2 Fix: Build RecommendationDTO from Redis hash (item:<id> schema).
+     * Fix: Build RecommendationDTO from Redis hash (item:<id> schema).
      * This allows Gateway to work with data loaded by data-pipeline/loader.py
+     * Fix: Use prod_name as primary name field (matches export_metadata.py schema)
      */
     private RecommendationDTO buildFromItemHash(String articleId, Map<Object, Object> hash) {
         try {
+            // Fix: prod_name is populated by bootstrap_data.py from colour_group_name
+            // (parquet file doesn't have prod_name field, so we map colour_group_name → prod_name)
+            String name = getHashValue(hash, "prod_name", "Unknown Product");
+            
+            // Debug logging
+            log.debug("Building from hash for {}: prod_name={}, hash keys={}", 
+                     articleId, name, hash.keySet());
+            
             return RecommendationDTO.builder()
                     .itemId(articleId)
-                    .name(getHashValue(hash, "product_type_name", "Unknown Product"))
+                    .name(name)
                     .category(getHashValue(hash, "department_name", "General"))
                     .description(getHashValue(hash, "detail_desc", ""))
                     .price(parsePrice(getHashValue(hash, "price", "0")))

@@ -4,22 +4,21 @@ kind: Kustomization
 # Minikube-specific configuration
 # Local development environment with minimal resource requirements
 
-bases:
-  - ../../base
-
-namePrefix: local-
-
-# Minikube-specific patches
-patchesStrategicMerge:
-  - ingress-minikube.yaml
-  - resource-limits-small.yaml
-  - init-job-fast.yaml  # Fast init (skip Milvus)
-
-# Optional: Inference HPA (only if not using Ray autoscaling)
 resources:
+  - ../../base
   - inference-hpa.yaml
 
-# Use local Docker images (or Docker Hub for simplicity)
+# Minikube-specific patches
+patches:
+  - path: ingress-minikube.yaml
+  - path: resource-limits-small.yaml
+  - path: init-job-fast.yaml
+
+# Minikube uses hostPath for storage
+
+# Image configuration for Minikube
+# Replace 'your-dockerhub-username' with actual Docker Hub username
+# Or use 'imagePullPolicy: Never' and build locally with: eval $(minikube docker-env)
 images:
   - name: scalestyle-gateway
     newName: your-dockerhub-username/scalestyle-gateway
@@ -31,21 +30,22 @@ images:
     newName: your-dockerhub-username/scalestyle-data-init
     newTag: latest
 
-# Minikube uses hostPath for storage
-configMapGenerator:
-  - name: env-config
-    literals:
-      - ENVIRONMENT=minikube
-      - REDIS_HOST=redis.scalestyle.svc.cluster.local
-      - MILVUS_HOST=milvus.scalestyle.svc.cluster.local
-      - INFERENCE_BASE_URL=http://inference.scalestyle.svc.cluster.local:8000
-
-# Enable port-forward friendly services
+# Minikube-specific ConfigMap overrides
 patches:
   - target:
-      kind: Service
-      name: gateway
+      kind: ConfigMap
+      name: scalestyle-config
     patch: |-
+      - op: add
+        path: /data/ENVIRONMENT
+        value: minikube
       - op: replace
-        path: /spec/type
-        value: NodePort
+        path: /data/REDIS_HOST
+        value: redis.scalestyle.svc.cluster.local
+      - op: replace
+        path: /data/MILVUS_HOST
+        value: milvus.scalestyle.svc.cluster.local
+      - op: replace
+        path: /data/INFERENCE_BASE_URL
+        value: http://inference.scalestyle.svc.cluster.local:8000
+

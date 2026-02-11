@@ -212,7 +212,7 @@ public class RecommendationService {
         log.warn("Ray inference fallback triggered for query: {}, intent: {}, reason: {}", query, intent, t.getClass().getSimpleName());
         degradedTotalCounter.increment();
         
-        // P1 Fix: Extract exception type for degradedReason field (for Grafana/Locust analysis)
+        // Fix: Extract exception type for degradedReason field (for Grafana/Locust analysis)
         String degradedReason = t != null ? t.getClass().getSimpleName() : "Unknown";
         
         String cacheKey = buildCacheKey(query, intent, k);
@@ -290,13 +290,12 @@ public class RecommendationService {
         CompletableFuture<List<RecommendationDTO>> future = null;
         try {
             // Add timeout to prevent blocking web threads indefinitely
-            // 800ms = HTTP client timeout (450ms) + circuit breaker overhead + buffer
             future = searchAsync(query, userId, intent, k, debug);
-            return future.get(800, java.util.concurrent.TimeUnit.MILLISECONDS);
+            return future.get(350, java.util.concurrent.TimeUnit.MILLISECONDS);
         } catch (java.util.concurrent.TimeoutException e) {
             // Timeout should trigger fallback, not return empty list
             // This provides better user experience and correct degradation semantics
-            log.warn("Async search timed out after 800ms (thread pool pressure): query={}", query);
+            log.warn("Async search timed out after 350ms (thread pool pressure): query={}", query);
             
             // Cancel the future to release resources
             if (future != null) {

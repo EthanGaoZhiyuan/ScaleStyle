@@ -105,7 +105,12 @@ def _stub_score(query: str, doc: str) -> float:
     return float(overlap * length_penalty)
 
 
-@serve.deployment(max_ongoing_requests=1)
+@serve.deployment(
+    # v2.3 optimization: max_ongoing_requests=6 avoids CPU/thread contention
+    # Balances concurrency with Torch thread competition on local CPU inference
+    ray_actor_options={"num_cpus": 0.5},
+    max_ongoing_requests=6,
+)
 class RerankerDeployment:
     """
     Ray Serve deployment for reranking search results.
@@ -202,7 +207,13 @@ class RerankerDeployment:
 
         except Exception as e:
             logger.error(
-                f"Failed to load model {self.model_name}. Falling back to stub model. Error: {e}"
+                f"❌ Failed to load reranker model '{self.model_name}': {e}\n"
+                f"   Falling back to stub scoring model.\n"
+                f"   Possible causes:\n"
+                f"   - Network connectivity issues\n"
+                f"   - HuggingFace Hub unreachable\n"
+                f"   - Model cache not available\n"
+                f"   Resolution: Check network, HF_HOME cache, or use stub mode explicitly"
             )
             self._mode = "stub"
 
@@ -212,9 +223,9 @@ class RerankerDeployment:
             try:
                 t0 = time.time()
                 _ = self._model.predict([("warmup query", "warmup doc")])
-                logger.info("reranker warmup ok %.1fms", (time.time() - t0) * 1000)
+                logger.info("✅ Reranker warmup ok %.1fms", (time.time() - t0) * 1000)
             except Exception as e:
-                logger.warning("reranker warmup failed: %s", e)
+                logger.warning("⚠️  Reranker warmup failed: %s", e)
 
     def is_enabled(self) -> bool:
         """

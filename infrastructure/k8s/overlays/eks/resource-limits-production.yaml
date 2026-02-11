@@ -1,9 +1,12 @@
 ---
-# Production resource limits (larger than Minikube)
+# Production resource limits for AWS EKS
+# Optimized for HA (2+ replicas) and higher concurrency
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: gateway
+  namespace: scalestyle
 spec:
   template:
     spec:
@@ -12,10 +15,10 @@ spec:
       - name: gateway
         resources:
           requests:
-            cpu: "500m"
+            cpu: "500m"      # Enough for HPA to trigger
             memory: "1Gi"
           limits:
-            cpu: "2"
+            cpu: "2"         # Allow bursting
             memory: "2Gi"
 
 ---
@@ -23,25 +26,30 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: inference
+  namespace: scalestyle
 spec:
+  replicas: 2  # HA: 2 replicas for chaos testing
   template:
     spec:
       serviceAccountName: scalestyle-sa  # Use IRSA
       containers:
       - name: inference
         resources:
+          # Production: Higher resources for better performance
+          # Ray needs: ~3.55 CPU for deployments + 2 CPU overhead
           requests:
-            cpu: "2"
-            memory: "4Gi"
+            cpu: "6"         # Sufficient for Ray + overhead
+            memory: "10Gi"   # Models + concurrent requests
           limits:
-            cpu: "4"
-            memory: "8Gi"
+            cpu: "10"        # Allow bursting for c=50 load
+            memory: "16Gi"   # Prevent OOM under stress
 
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: redis
+  namespace: scalestyle
 spec:
   template:
     spec:

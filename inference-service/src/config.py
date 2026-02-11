@@ -36,14 +36,14 @@ class EmbeddingConfig:
         "EMBEDDING_QUERY_PREFIX",
         "Represent this sentence for searching relevant passages:",
     )
-    TIMEOUT_MS = int(os.getenv("EMBEDDING_TIMEOUT_MS", "1200"))
+    TIMEOUT_MS = int(os.getenv("EMBEDDING_TIMEOUT_MS", "120"))
 
 
 class RetrievalConfig:
     """Retrieval and search configuration."""
 
     RECALL_K = int(os.getenv("RECALL_K", "100"))
-    TIMEOUT_MS = int(os.getenv("RETRIEVAL_TIMEOUT_MS", "800"))
+    TIMEOUT_MS = int(os.getenv("RETRIEVAL_TIMEOUT_MS", "60"))
 
 
 class RerankerConfig:
@@ -66,7 +66,7 @@ class RerankerConfig:
         os.getenv("RERANKER_MAX_DOCS", "50")
     )  # Rerank top 50 is usually enough
     MODE = os.getenv("RERANKER_MODE", "cross-encoder")
-    TIMEOUT_MS = int(os.getenv("RERANKER_TIMEOUT_MS", "1200"))
+    TIMEOUT_MS = int(os.getenv("RERANKER_TIMEOUT_MS", "80"))
     WARMUP = _get_bool.__func__("RERANKER_WARMUP", True)
 
 
@@ -91,7 +91,7 @@ class GenerationConfig:
 
     ENABLED = _get_bool.__func__("GENERATION_ENABLED", False)  # Default off
     MODE = os.getenv("GENERATION_MODE", "template").lower()  # template or llm
-    TIMEOUT_MS = int(os.getenv("GENERATION_TIMEOUT_MS", "600"))
+    TIMEOUT_MS = int(os.getenv("GENERATION_TIMEOUT_MS", "10"))
     FLOW = os.getenv("GENERATION_FLOW", "smart")  # smart or all
     MODEL = os.getenv("GENERATION_MODEL", "Qwen/Qwen2-1.5B-Instruct")
     DEVICE = os.getenv("GENERATION_DEVICE", "auto")

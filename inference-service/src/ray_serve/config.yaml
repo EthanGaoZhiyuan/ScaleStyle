@@ -13,21 +13,25 @@ applications:
     runtime_env:
       env_vars:
         # ========================================
-        # P1 Fix: Removed duplicate configs that are already defined in docker-compose.yml
-        # Single source of truth: docker-compose.yml controls infrastructure configs
-        # Keep only Ray Serve-specific and generation-specific configs here
+        # Fix: Removed GENERATION_ENABLED from runtime_env
+        # Let ConfigMap (single source of truth) control generation feature toggle
+        # ConfigMap value: GENERATION_ENABLED="1" (default in K8s)
         # ========================================
         
         # Embedding configuration (Ray Serve specific)
-        EMBEDDING_NUM_CPUS: "2"
+        # Fix: Optimized for high concurrency with limited resources
+        EMBEDDING_NUM_CPUS: "1"  # Production (云): 2 CPU cores | Local (Docker Desktop): 1 CPU core
         EMBEDDING_QUERY_PREFIX: "Represent this sentence for searching relevant passages:"
+        
+        # Fix: Performance test mode - disable non-critical features
+        # Set PERF_TEST_MODE="1" to disable CLIP/Generation for max throughput
+        PERF_TEST_MODE: "0"  # 0=normal, 1=perf test (disable CLIP/Gen)
         
         # A/B testing configuration (Ray Serve specific)
         BASE_FLOW_MODE: "vector"  # Options: vector, popularity
         
         # Generation configuration (Optional feature, not in docker-compose)
-        # P0-1 Fix: Default enabled with template mode (no model download needed)
-        GENERATION_ENABLED: "1"  # Week 3: Default on for AI recommendation reason
+        # Note: GENERATION_ENABLED controlled by ConfigMap/docker-compose, not here
         GENERATION_MODE: "template"  # Options: template (fast), llm (requires model)
         GENERATION_TIMEOUT_MS: "500"  # Week 3: Reduced from 600ms to 500ms
         GENERATION_FLOW: "smart"  # Options: smart (only SEARCH), all (always)

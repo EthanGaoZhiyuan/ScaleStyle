@@ -9,7 +9,13 @@ from deployments.reranker import RerankerDeployment
 from deployments.generation import GenerationDeployment
 from deployments.clip_search import CLIPSearchDeployment
 
-ray.init(ignore_reinit_error=True)
+# Initialize Ray with appropriate memory configuration
+# K8s pod has 8GB limit, allocate 7GB to Ray to avoid OOM
+ray.init(
+    ignore_reinit_error=True,
+    _memory=7 * 1024 * 1024 * 1024,  # 7GB in bytes
+    object_store_memory=1 * 1024 * 1024 * 1024,  # 1GB for object store
+)
 serve.start(detached=True)
 
 # 1. Deploy Core Services

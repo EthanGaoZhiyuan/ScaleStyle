@@ -56,10 +56,10 @@ POPULARITY_TOPN = 1000
 
 # Default parquet paths (try in order)
 DEFAULT_PARQUET_PATHS = [
+    "data/processed/article_embeddings_bge_detail.parquet",  # Has prod_name - preferred
     "data/processed/article_embeddings_bge_v2.parquet",
-    "data/processed/article_embeddings_bge_detail.parquet",
-    "data-pipeline/data/processed/article_embeddings_bge_v2.parquet",
     "data-pipeline/data/processed/article_embeddings_bge_detail.parquet",
+    "data-pipeline/data/processed/article_embeddings_bge_v2.parquet",
 ]
 
 
@@ -134,12 +134,13 @@ def load_redis_data(df):
     popularity_ids = []
 
     for _, row in tqdm(df.iterrows(), total=len(df), desc="Redis metadata"):
-        article_id = int(row["article_id"])
+        # Pad article_id to 10 digits to match Gateway padArticleId()
+        article_id = str(int(row["article_id"])).zfill(10)
         key = f"item:{article_id}"
 
         meta = {
-            "article_id": str(article_id),
-            "colour_group_name": str(row.get("colour_group_name", "")),
+            "article_id": article_id,
+            "prod_name": str(row.get("prod_name", "Unknown Product")),
             "product_type_name": str(row.get("product_type_name", "")),
             "department_name": str(row.get("department_name", "")),
             "detail_desc": str(row.get("detail_desc", ""))[:5000],
@@ -152,9 +153,9 @@ def load_redis_data(df):
 
         pipe.hset(key, mapping=meta)
 
-        # Collect for popularity list
+        # Collect for popularity list (use padded ID)
         if len(popularity_ids) < POPULARITY_TOPN:
-            popularity_ids.append(str(article_id))
+            popularity_ids.append(article_id)
 
     pipe.execute()
     print(f"  ✓ Loaded {len(df)} item metadata")

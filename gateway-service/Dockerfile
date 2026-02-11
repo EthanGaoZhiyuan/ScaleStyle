@@ -67,11 +67,17 @@ ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOut
 
 # 11. Start application with OTel instrumentation
 # Use 'exec' to ensure Java becomes PID1 for proper SIGTERM handling (K8s graceful shutdown)
+# OpenTelemetry configuration for distributed tracing (AI Infra interview requirement)
+# - javaagent: Auto-instruments Spring Boot RestTemplate/WebClient for trace propagation
+# - endpoint: Export traces to Jaeger via OTLP gRPC (default: jaeger:4317)
+# - propagators: W3C Trace Context for cross-service trace continuity
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS \
     -javaagent:/app/opentelemetry-javaagent.jar \
     -Dotel.service.name=gateway-service \
     -Dotel.traces.exporter=otlp \
+    -Dotel.exporter.otlp.endpoint=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317} \
     -Dotel.exporter.otlp.protocol=grpc \
+    -Dotel.propagators=tracecontext,baggage \
     -Dotel.metrics.exporter=none \
     -Dotel.logs.exporter=none \
     -jar app.jar"]

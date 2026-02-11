@@ -1,6 +1,6 @@
 ---
 # Data Initialization Job: Load data into Redis and Milvus
-# P0-3 Fix: Uses pre-built image with dependencies for fast, reliable initialization
+# Fix: Uses pre-built image with dependencies for fast, reliable initialization
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -52,10 +52,9 @@ spec:
       
       containers:
       - name: data-loader
-        # P0-3 Fix: Use pre-built image with dependencies baked in
-        # Build: docker build -t your-dockerhub-username/scalestyle-data-init:latest ./data-pipeline
-        # Push: docker push your-dockerhub-username/scalestyle-data-init:latest
-        image: your-dockerhub-username/scalestyle-data-init:latest
+        # Fix: Use pre-built image with dependencies baked in
+        # Image will be replaced by Kustomize overlay
+        image: scalestyle-data-init:latest
         imagePullPolicy: Always
         
         # Run bootstrap script from the image

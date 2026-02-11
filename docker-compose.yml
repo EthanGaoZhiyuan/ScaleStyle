@@ -69,7 +69,7 @@ services:
       - HF_HUB_DISABLE_TELEMETRY=1
       - TOKENIZERS_PARALLELISM=false
       # ----- OpenTelemetry Tracing -----
-      # P1 Fix: Unified format with scheme (consistent with gateway)
+      # Fix: Unified format with scheme (consistent with gateway)
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - OTEL_SERVICE_NAME=inference-service
       # ----- Ray gRPC Configuration (Fix SSL handshake errors) -----

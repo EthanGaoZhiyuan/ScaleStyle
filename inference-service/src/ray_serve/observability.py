@@ -43,7 +43,6 @@ def setup_tracing(service_name: str = "inference-service") -> trace.Tracer:
         return trace.get_tracer(__name__)
 
     # Get Jaeger endpoint from environment
-    # P1 Fix: Strip http:// scheme if present (OTLPSpanExporter expects bare host:port for gRPC)
     jaeger_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "jaeger:4317")
     if jaeger_endpoint.startswith("http://"):
         jaeger_endpoint = jaeger_endpoint[7:]  # Remove "http://" prefix

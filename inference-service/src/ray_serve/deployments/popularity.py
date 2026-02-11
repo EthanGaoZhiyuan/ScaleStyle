@@ -23,7 +23,10 @@ def _redis_client() -> redis.Redis:
     )
 
 
-@serve.deployment
+@serve.deployment(
+    # Simple Redis query needs minimal CPU
+    ray_actor_options={"num_cpus": 0.1}
+)
 class PopularityDeployment:
     """
     Ray Serve deployment for popularity-based recommendations.

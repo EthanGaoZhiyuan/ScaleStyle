@@ -62,6 +62,13 @@ dependencies {
     
     // Jackson support for Redis serialization
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+    
+    // OpenTelemetry for distributed tracing (AI Infra interview requirement)
+    implementation 'io.opentelemetry:opentelemetry-api:1.35.0'
+    implementation 'io.opentelemetry:opentelemetry-sdk:1.35.0'
+    implementation 'io.opentelemetry:opentelemetry-exporter-otlp:1.35.0'
+    implementation 'io.opentelemetry.instrumentation:opentelemetry-spring-boot-starter:2.1.0-alpha'
+    implementation 'io.opentelemetry.instrumentation:opentelemetry-spring-webmvc-6.0:2.1.0-alpha'
 }
 
 protobuf {

@@ -29,8 +29,8 @@ spec:
     spec:
       containers:
       - name: gateway
-        # Update with your Docker Hub image
-        image: your-dockerhub-username/scalestyle-gateway:latest
+        # Image will be replaced by Kustomize overlay
+        image: scalestyle-gateway:latest
         imagePullPolicy: Always
         
         ports:

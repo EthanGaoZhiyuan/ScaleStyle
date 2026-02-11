@@ -15,6 +15,6 @@ public class InferenceSearchRequest {
     private Boolean debug = false;
     @JsonProperty("user_id")
     private String userId;
-    // P0-1+: Add intent for multi-intent support (search/similar/outfit/trend)
+    // Add intent for multi-intent support (search/similar/outfit/trend)
     private String intent;
 }

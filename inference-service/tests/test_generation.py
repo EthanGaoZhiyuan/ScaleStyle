@@ -23,7 +23,6 @@ pytestmark = pytest.mark.skipif(
 @pytest.fixture
 def generation():
     """Create a generation deployment instance for testing."""
-    # P1 Fix: Use func_or_class to get underlying class
     GenCls = GenerationDeployment.func_or_class
     return GenCls()
 

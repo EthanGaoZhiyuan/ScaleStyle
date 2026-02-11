@@ -14,11 +14,17 @@
 build/
 bin/
 out/
+target/
 *.class
 *.jar
 *.war
 *.ear
 *.log
+*.iml
+.tox/
+
+# Large binaries that should be downloaded, not committed
+gateway-service/opentelemetry-javaagent.jar
 
 # =========================
 # Python
@@ -36,7 +42,9 @@ htmlcov/
 dist/
 build/
 *.egg-info/
-
+env.local
+*.local
+.
 # venv / env
 venv/
 .venv/
@@ -52,7 +60,12 @@ venv/
 ray_session*/
 *.pid
 cache/
-.cache/
+.cac
+
+# Test results (keep only final consolidated reports)
+tests/**/test-results/*.md
+test-results/
+*.loghe/
 ray_results/
 tmp/
 
@@ -82,6 +95,18 @@ data-pipeline/data/**/*.safetensors
 !**/package.json
 !**/tsconfig.json
 !**/*.config.json
+
+# =========================
+# Observability Data
+# =========================
+observability/**/data/
+**/grafana/data/
+**/prometheus/data/
+**/jaeger/data/
+
+# =========================
+# Archived docs (cleanup candidates)
+# =========================
 
 # ===== OS =====
 .DS_Store

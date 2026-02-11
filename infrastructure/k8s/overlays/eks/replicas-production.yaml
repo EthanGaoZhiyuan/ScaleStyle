@@ -4,6 +4,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: gateway
+  namespace: scalestyle
 spec:
   replicas: 3  # Start with 3 replicas for HA
 
@@ -12,6 +13,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: inference
+  namespace: scalestyle
 spec:
   replicas: 2  # Start with 2 replicas
 
@@ -21,6 +23,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: gateway-hpa
+  namespace: scalestyle
 spec:
   minReplicas: 3
   maxReplicas: 10

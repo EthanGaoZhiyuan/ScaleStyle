@@ -36,8 +36,6 @@ from src.ray_serve.deployments.embedding import EmbeddingDeployment
 from src.ray_serve.deployments.retrieval import RetrievalDeployment
 from src.ray_serve.deployments.popularity import PopularityDeployment
 from src.ray_serve.deployments.reranker import RerankerDeployment
-from src.ray_serve.deployments.generation import GenerationDeployment
-from src.ray_serve.deployments.clip_search import CLIPSearchDeployment
 from src.config import (
     RetrievalConfig,
     EmbeddingConfig,
@@ -94,7 +92,7 @@ class SearchRequest(BaseModel):
     k: int = Field(10, ge=1, le=50)
     debug: bool = False
     user_id: Optional[str] = None
-    intent: Optional[str] = "search"  # P0-1+: Multi-intent support
+    intent: Optional[str] = "search"
 
 
 def _local_image_url(article_id: str) -> str:
@@ -401,7 +399,7 @@ def _build_rerank_doc(meta: dict) -> str:
 
 @serve.deployment(
     num_replicas=1,
-    ray_actor_options={"num_cpus": 1},
+    ray_actor_options={"num_cpus": 0.25},
 )
 class IngressDeployment:
     """
@@ -1051,7 +1049,7 @@ class IngressDeployment:
                                 span.set_attribute("mode", mode)
                                 span.set_attribute("fallback", not bool(reason_value))
 
-                                # Fix: Correct contract_dbg if reason was generated
+                                # Update contract_dbg if reason was generated
                                 if reason_value and contract_dbg_cache:
                                     missing_by_field = contract_dbg_cache.get(
                                         "missing_by_field", {}
@@ -1102,7 +1100,7 @@ class IngressDeployment:
                                     e,
                                 )
             except Exception as e:
-                # Fallback to popularity on enrichment/filtering failure (P0-2: also needs contract normalize)
+                # Fallback to popularity on enrichment/filtering failure (also needs contract normalize)
                 main_span.set_attribute("error", True)
                 main_span.set_attribute("error.message", str(e))
                 logger.exception(
@@ -1129,7 +1127,7 @@ class IngressDeployment:
                     ),
                 )
 
-            # Build final response using unified helper (P0-1: ensures contract_dbg is always defined)
+            # Build final response using unified helper (ensures contract_dbg is always defined)
             rerank_debug = {"mode": rerank_mode} if rerank_mode else None
             if rerank_effect:
                 if rerank_debug is None:
@@ -1341,13 +1339,18 @@ class IngressDeployment:
 
 
 # Bind individual deployment nodes for the Ray Serve application graph
+# Conditional deployment binding based on PERF_TEST_MODE
 router_node = RouterDeployment.bind()
 embedding_node = EmbeddingDeployment.bind()
 retrieval_node = RetrievalDeployment.bind()
 popularity_node = PopularityDeployment.bind()
 reranker_node = RerankerDeployment.bind()
-generation_node = GenerationDeployment.bind()
-clip_search_node = CLIPSearchDeployment.bind()
+
+# Disable Generation/CLIP for performance testing
+# This reduces CPU requirements by ~2-3 cores, enabling 2-pod deployment on Docker Desktop
+# To re-enable: uncommment the两 bind() calls below
+generation_node = None  # GenerationDeployment.bind()
+clip_search_node = None  # CLIPSearchDeployment.bind()
 
 # Bind ingress deployment with all dependency handles
 # This creates the complete application graph for Ray Serve

@@ -4,7 +4,10 @@ import hashlib
 from typing import Optional
 
 
-@serve.deployment
+@serve.deployment(
+    # Lightweight routing logic needs minimal CPU
+    ray_actor_options={"num_cpus": 0.1}
+)
 class RouterDeployment:
     """
     Router deployment for query intent classification and A/B test bucketing.

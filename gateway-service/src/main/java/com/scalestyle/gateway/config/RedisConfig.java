@@ -1,8 +1,6 @@
 package com.scalestyle.gateway.config;
 
-import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.scalestyle.gateway.dto.RecommendationDTO;
 import org.springframework.context.annotation.Bean;
@@ -36,17 +34,9 @@ public class RedisConfig {
         template.setKeySerializer(keySerializer);
         template.setHashKeySerializer(keySerializer);
 
-        // Value serializer - use Jackson JSON
-        // Security: Restrict polymorphic types to DTO package only (not Object.class)
+        // Value serializer - use Jackson JSON for RecommendationDTO
         ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
-        objectMapper.activateDefaultTyping(
-                BasicPolymorphicTypeValidator.builder()
-                        .allowIfBaseType(RecommendationDTO.class)
-                        .build(),
-                ObjectMapper.DefaultTyping.NON_FINAL,
-                JsonTypeInfo.As.PROPERTY
-        );
 
         Jackson2JsonRedisSerializer<RecommendationDTO> valueSerializer = 
                 new Jackson2JsonRedisSerializer<>(objectMapper, RecommendationDTO.class);
@@ -59,7 +49,7 @@ public class RedisConfig {
     }
     
     /**
-     * P0-2 Fix: ObjectMapper bean for manual JSON serialization of List<RecommendationDTO>.
+     * Fix: ObjectMapper bean for manual JSON serialization of List<RecommendationDTO>.
      * This approach avoids Jackson's default typing issues with generic collections.
      * Used by RecommendationService to serialize/deserialize cache values as JSON strings.
      */

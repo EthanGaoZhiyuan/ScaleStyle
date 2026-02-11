@@ -29,7 +29,7 @@ except ImportError:
     name="clip-search",
     num_replicas=1,
     ray_actor_options={"num_cpus": 1, "num_gpus": 0},
-    max_concurrent_queries=10,
+    max_ongoing_requests=10,
 )
 class CLIPSearchDeployment:
     """

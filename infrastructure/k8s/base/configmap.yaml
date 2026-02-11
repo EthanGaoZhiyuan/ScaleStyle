@@ -54,7 +54,7 @@ data:
   # Gateway Configuration
   # ==========================================
   GATEWAY_PORT: "8080"
-  # P0-1 Fix: Must match Gateway's application.properties (INFERENCE_BASE_URL)
+  # Fix: Must match Gateway's application.properties (INFERENCE_BASE_URL)
   INFERENCE_BASE_URL: "http://inference:8000"
   
   # Fix: HTTP client factory for Ray Serve compatibility
@@ -78,6 +78,6 @@ data:
   # ==========================================
   JAVA_OPTS: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
   
-  # P1-1 Fix: Standardize HF cache path (matches inference Dockerfile)
+  # Fix: Standardize HF cache path (matches inference Dockerfile)
   HF_HOME: "/cache/huggingface"
   TRANSFORMERS_CACHE: "/cache/huggingface/hub"

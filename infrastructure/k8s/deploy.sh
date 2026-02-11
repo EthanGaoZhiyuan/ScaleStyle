@@ -93,7 +93,7 @@ function validate_environment() {
 function deploy() {
     log_info "Deploying to $ENVIRONMENT..."
     
-    OVERLAY_PATH="infrastructure/k8s-kustomize/overlays/$ENVIRONMENT"
+    OVERLAY_PATH="infrastructure/k8s/overlays/$ENVIRONMENT"
     
     if [ ! -d "$OVERLAY_PATH" ]; then
         log_error "Overlay not found: $OVERLAY_PATH"
@@ -131,7 +131,7 @@ function deploy() {
 function delete_resources() {
     log_warn "Deleting resources from $ENVIRONMENT..."
     
-    OVERLAY_PATH="infrastructure/k8s-kustomize/overlays/$ENVIRONMENT"
+    OVERLAY_PATH="infrastructure/k8s/overlays/$ENVIRONMENT"
     
     if [ ! -d "$OVERLAY_PATH" ]; then
         log_error "Overlay not found: $OVERLAY_PATH"
@@ -151,7 +151,7 @@ function delete_resources() {
 function diff_changes() {
     log_info "Showing diff for $ENVIRONMENT..."
     
-    OVERLAY_PATH="infrastructure/k8s-kustomize/overlays/$ENVIRONMENT"
+    OVERLAY_PATH="infrastructure/k8s/overlays/$ENVIRONMENT"
     
     if command -v kustomize &> /dev/null; then
         kustomize build "$OVERLAY_PATH" | kubectl diff -f - || true
@@ -163,7 +163,7 @@ function diff_changes() {
 function validate_manifests() {
     log_info "Validating manifests for $ENVIRONMENT..."
     
-    OVERLAY_PATH="infrastructure/k8s-kustomize/overlays/$ENVIRONMENT"
+    OVERLAY_PATH="infrastructure/k8s/overlays/$ENVIRONMENT"
     
     if command -v kustomize &> /dev/null; then
         kustomize build "$OVERLAY_PATH" | kubectl apply --dry-run=client -f -
