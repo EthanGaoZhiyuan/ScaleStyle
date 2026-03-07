@@ -98,6 +98,35 @@ class GenerationConfig:
     MAX_NEW_TOKENS = int(os.getenv("GENERATION_MAX_NEW_TOKENS", "48"))
     TEMPERATURE = float(os.getenv("GENERATION_TEMPERATURE", "0.2"))
     TOP_P = float(os.getenv("GENERATION_TOP_P", "0.9"))
+
+
+class PersonalizationConfig:
+    """Personalization behavior boost configuration.
+    
+    Week 2: Real-time behavior loop
+    P1.6: Made boost constants configurable via env vars
+    """
+    
+    @staticmethod
+    def _get_bool(name: str, default: bool = False) -> bool:
+        """Parse boolean from environment variable."""
+        val = os.getenv(name)
+        if val is None:
+            return default
+        return val.strip().lower() in ("1", "true", "yes", "y", "on")
+    
+    # Feature toggles
+    ENABLED = _get_bool.__func__("PERSONALIZATION_ENABLED", True)
+    
+    # Boost multipliers
+    EXACT_CLICK_BOOST = float(os.getenv("EXACT_CLICK_BOOST", "1.5"))
+    CATEGORY_AFFINITY_BOOST = float(os.getenv("CATEGORY_AFFINITY_BOOST", "1.2"))
+    
+    # Feature limits
+    MAX_RECENT_CLICKS_USED = int(os.getenv("MAX_RECENT_CLICKS_USED", "20"))
+    
+    # Debug mode
+    DEBUG_MODE = _get_bool.__func__("PERSONALIZATION_DEBUG", False)
     DO_SAMPLE = _get_bool.__func__("GENERATION_DO_SAMPLE", False)
     WARMUP = _get_bool.__func__("GENERATION_WARMUP", True)
 

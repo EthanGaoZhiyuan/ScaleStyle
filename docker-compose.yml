@@ -16,6 +16,8 @@ services:
       - METADATA_PATH=/app/data/product_metadata.json
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      # Kafka configuration (Week 2)
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       # OpenTelemetry configuration
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
     volumes:
@@ -68,6 +70,13 @@ services:
       - RAY_SERVE_RUN_SYNC_IN_THREADPOOL=1
       - HF_HUB_DISABLE_TELEMETRY=1
       - TOKENIZERS_PARALLELISM=false
+      
+      # ----- Week 2: Behavior Boost (P1.3 configurable) -----
+      - EXACT_CLICK_BOOST=1.5           # Multiplier for exact item match
+      - CATEGORY_AFFINITY_BOOST=1.2     # Multiplier for category affinity
+      - MAX_RECENT_CLICKS_USED=20       # Max recent clicks to consider
+      - PERSONALIZATION_ENABLED=true    # Toggle personalization on/off
+      
       # ----- OpenTelemetry Tracing -----
       # Fix: Unified format with scheme (consistent with gateway)
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
@@ -195,7 +204,75 @@ services:
       - scalestyle-net
 
   # ==========================================
-  # 8. Jaeger (Distributed Tracing)
+  # 7. Zookeeper (Kafka coordination)
+  # Week 2: Real-time behavior loop
+  # ==========================================
+  zookeeper:
+    container_name: scalestyle-zookeeper
+    image: confluentinc/cp-zookeeper:7.6.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - scalestyle-net
+
+  # ==========================================
+  # 8. Kafka (Event streaming)
+  # Week 2: Real-time behavior loop
+  # ==========================================
+  kafka:
+    container_name: scalestyle-kafka
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_RETENTION_HOURS: 168  # 7 days
+      KAFKA_COMPRESSION_TYPE: gzip
+    networks:
+      - scalestyle-net
+
+  # ==========================================
+  # 9. Event Consumer (Kafka consumer)
+  # Week 2: Real-time behavior loop
+  # ==========================================
+  event-consumer:
+    container_name: scalestyle-event-consumer
+    build:
+      context: ./event-consumer
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"  # Metrics endpoint
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TOPIC=scalestyle.clicks
+      - KAFKA_GROUP_ID=event-consumer
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RECENT_CLICKS_MAX=100
+      - AFFINITY_DECAY_DAYS=7
+      - LOG_INTERVAL=100
+      - METRICS_PORT=8000
+    depends_on:
+      kafka:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - scalestyle-net
+
+  # ==========================================
+  # 10. Jaeger (Distributed Tracing)
   # ==========================================
   jaeger:
     container_name: scalestyle-jaeger
@@ -210,7 +287,7 @@ services:
       - scalestyle-net
 
   # ==========================================
-  # 9. Prometheus (Metrics Collection)
+  # 11. Prometheus (Metrics Collection)
   # ==========================================
   prometheus:
     container_name: scalestyle-prometheus
@@ -232,7 +309,7 @@ services:
       - scalestyle-net
 
   # ==========================================
-  # 10. Grafana (Metrics Visualization)
+  # 12. Grafana (Metrics Visualization)
   # ==========================================
   grafana:
     container_name: scalestyle-grafana

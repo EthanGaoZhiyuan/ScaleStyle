@@ -36,6 +36,8 @@ from src.ray_serve.deployments.embedding import EmbeddingDeployment
 from src.ray_serve.deployments.retrieval import RetrievalDeployment
 from src.ray_serve.deployments.popularity import PopularityDeployment
 from src.ray_serve.deployments.reranker import RerankerDeployment
+from src.ray_serve.deployments.generation import GenerationDeployment
+from src.ray_serve.deployments.vision import VisionDeployment
 from src.config import (
     RetrievalConfig,
     EmbeddingConfig,
@@ -45,6 +47,9 @@ from src.config import (
 
 # Initialize observability
 from src.ray_serve.observability import setup_tracing
+
+# Week 2: Personalization module (P1.2)
+from src.personalization import FeatureReader, BehaviorBoost
 
 logger = logging.getLogger("scalestyle.ingress")
 
@@ -186,7 +191,7 @@ def _contract_normalize(results: list, limit: int):
     return out, {"missing_total": missing_total, "missing_by_field": missing_by_field}
 
 
-def _normalize_meta(article_id: str, raw: dict) -> dict:
+def _normalize_meta(article_id: str, raw: dict) -> tuple[dict, list[str]]:
     """
     Normalize and standardize item metadata for API contract compliance.
 
@@ -397,6 +402,96 @@ def _build_rerank_doc(meta: dict) -> str:
     return " | ".join([p for p in parts if p])
 
 
+# -------------------------------------------------------------------
+# Legacy function - DEPRECATED (P1.2 refactoring)
+# Behavior boost logic has been refactored into:
+# - src/personalization/feature_reader.py
+# - src/personalization/behavior_boost.py
+# 
+# Keeping this commented out for reference during transition
+# -------------------------------------------------------------------
+"""
+async def _apply_user_behavior_boost(
+    redis_client, user_id: Optional[str], results: list
+) -> dict:
+    Apply user behavior-based boosting to reranked results (Week 2: Real-time behavior loop).
+    
+    Boosts items based on user's recent clicks and category affinity:
+    1. Same category as recently clicked items → 1.2x boost
+    2. Exact item clicked recently → 1.5x boost
+    3. Similar items (based on embedding proximity) → 1.1x boost
+    
+    Args:
+        redis_client: Redis client for fetching user features
+        user_id: Optional user ID
+        results: List of search results with scores
+    
+    Returns:
+        dict: Debug info about boosting applied
+    if not user_id or not results:
+        return {"applied": False, "reason": "no_user_or_results"}
+    
+    try:
+        # Fetch user's recent clicks from Redis (Week 2 feature)
+        recent_clicks_key = f"user:{user_id}:recent_clicks"
+        recent_clicks = redis_client.lrange(recent_clicks_key, 0, 9)  # Last 10 clicks
+        
+        if not recent_clicks:
+            return {"applied": False, "reason": "no_recent_clicks"}
+        
+        # Fetch categories for recently clicked items
+        clicked_categories = set()
+        for item_id in recent_clicks:
+            cat = redis_client.hget(f"item:{item_id}:meta", "product_group_name")
+            if cat:
+                clicked_categories.add(cat)
+        
+        # Apply boosts to results
+        boosted_count = 0
+        category_boosted = 0
+        exact_match_boosted = 0
+        
+        for result in results:
+            article_id = result.get("article_id")
+            meta = result.get("meta", {})
+            current_score = result.get("rerank_score", result.get("score", 0.0))
+            
+            # 1. Exact match boost (user clicked this item before)
+            if article_id in recent_clicks:
+                result["rerank_score"] = current_score * 1.5
+                result["boost_reason"] = "recent_click"
+                boosted_count += 1
+                exact_match_boosted += 1
+                continue
+            
+            # 2. Category affinity boost
+            item_category = meta.get("product_group_name")
+            if item_category and item_category in clicked_categories:
+                result["rerank_score"] = current_score * 1.2
+                result["boost_reason"] = "category_affinity"
+                boosted_count += 1
+                category_boosted += 1
+        
+        # Re-sort results after applying boosts
+        if boosted_count > 0:
+            results.sort(key=lambda x: x.get("rerank_score", x.get("score", 0.0)), reverse=True)
+        
+        return {
+            "applied": True,
+            "recent_clicks_count": len(recent_clicks),
+            "clicked_categories": list(clicked_categories),
+            "total_boosted": boosted_count,
+            "exact_match_boosted": exact_match_boosted,
+            "category_boosted": category_boosted,
+        }
+    
+    except Exception as e:
+        logger = logging.getLogger("scalestyle.ingress")
+        logger.error(f"Failed to apply user behavior boost: {e}")
+        return {"applied": False, "reason": "error", "error": str(e)}
+"""
+
+
 @serve.deployment(
     num_replicas=1,
     ray_actor_options={"num_cpus": 0.25},
@@ -425,7 +520,7 @@ class IngressDeployment:
         popularity_handle: DeploymentHandle,
         reranker_handle: DeploymentHandle,
         generation_handle: DeploymentHandle,
-        clip_search_handle: Optional[DeploymentHandle] = None,
+        vision_handle: Optional[DeploymentHandle] = None,
     ):
         """
         Initialize the ingress deployment with handles to other deployments.
@@ -437,7 +532,7 @@ class IngressDeployment:
             popularity_handle: Handle to popularity deployment for fallback recommendations.
             reranker_handle: Handle to reranker deployment for result reordering.
             generation_handle: Handle to generation deployment for recommendation explanations.
-            clip_search_handle: Optional handle to CLIP search deployment for image-based search.
+            vision_handle: Optional handle to vision deployment for multimodal search.
         """
         # Store handles to downstream deployments
         self.router_handle = router_handle
@@ -446,11 +541,15 @@ class IngressDeployment:
         self.popularity_handle = popularity_handle
         self.reranker_handle = reranker_handle
         self.generation_handle = generation_handle
-        self.clip_search_handle = clip_search_handle
+        self.vision_handle = vision_handle
 
         # Don't initialize Redis here - it causes serialization issues
         # Will be lazily initialized in property getter
         self._redis = None
+        
+        # Week 2: Personalization modules (lazy init to avoid serialization issues)
+        self._feature_reader = None
+        self._behavior_boost = None
 
         # Initialize OpenTelemetry tracer
         self.tracer = setup_tracing("inference-service")
@@ -495,6 +594,30 @@ class IngressDeployment:
         if self._redis is None:
             self._redis = _redis_client()
         return self._redis
+    
+    @property
+    def feature_reader(self):
+        """Lazy initialization of FeatureReader (Week 2 personalization)"""
+        if self._feature_reader is None:
+            self._feature_reader = FeatureReader(self.redis)
+        return self._feature_reader
+    
+    @property
+    def behavior_boost(self):
+        """Lazy initialization of BehaviorBoost (Week 2 personalization)"""
+        if self._behavior_boost is None:
+            # Read config from environment or use defaults
+            # P1.6: Use PersonalizationConfig for boost parameters
+            from src.config import PersonalizationConfig
+            
+            self._behavior_boost = BehaviorBoost(
+                feature_reader=self.feature_reader,
+                exact_click_boost=PersonalizationConfig.EXACT_CLICK_BOOST,
+                category_affinity_boost=PersonalizationConfig.CATEGORY_AFFINITY_BOOST,
+                max_recent_clicks=PersonalizationConfig.MAX_RECENT_CLICKS_USED,
+                debug_mode=PersonalizationConfig.DEBUG_MODE
+            )
+        return self._behavior_boost
 
     async def __call__(self, request: Request):
         """
@@ -919,7 +1042,19 @@ class IngressDeployment:
                                         reverse=True,
                                     )
 
-                                    # Capture order after reranking
+                                    # Week 2: Apply user behavior-based boosting (refactored P1.2+P1.3)
+                                    # P0.4: Removed fake async - now synchronous call
+                                    # P1.6: Use PersonalizationConfig.ENABLED
+                                    behavior_boost_info = {"boosted_items": 0}
+                                    from src.config import PersonalizationConfig
+                                    if PersonalizationConfig.ENABLED:
+                                        behavior_boost_info = self.behavior_boost.apply_boost(
+                                            req.user_id, results
+                                        )
+                                    else:
+                                        logger.debug("⏸️  Personalization disabled via PERSONALIZATION_ENABLED")
+
+                                    # Capture order after reranking (and boosting)
                                     after_ids = [r.get("article_id") for r in results]
 
                                     # Calculate rerank effect
@@ -951,24 +1086,27 @@ class IngressDeployment:
                                     if req.debug:
                                         logger.info(
                                             "request_id=%s RERANK_EFFECT: changed=%d/%d top1_changed=%s "
-                                            "before_top5=%s after_top5=%s",
+                                            "before_top5=%s after_top5=%s behavior_boost=%s",
                                             request_id,
                                             changed_positions,
                                             top_k_compare,
                                             top1_changed,
                                             before_ids[:5],
                                             after_ids[:5],
+                                            behavior_boost_info,
                                         )
                                         # Detailed score comparison for top 3
                                         for i in range(min(3, len(before_ids))):
+                                            boost_reason = results[i].get("boost_reason", "none")
                                             logger.info(
                                                 "request_id=%s RERANK_DETAIL rank=%d: "
-                                                "article_id=%s vector_score=%.4f rerank_score=%.4f",
+                                                "article_id=%s vector_score=%.4f rerank_score=%.4f boost=%s",
                                                 request_id,
                                                 i + 1,
                                                 after_ids[i],
                                                 results[i].get("score", 0),
                                                 results[i].get("rerank_score", 0),
+                                                boost_reason,
                                             )
 
                             except Exception as e:
@@ -1206,12 +1344,14 @@ class IngressDeployment:
 
     async def _image_search_handler(self, request: Request) -> JSONResponse:
         """
-        Handle CLIP-based image search requests.
+        Handle vision-based image/multimodal search requests.
 
         Request body:
         {
+            "mode": "image"|"text_to_image"|"multimodal",
             "image_url": "https://example.com/image.jpg",  # OR
             "image_base64": "iVBORw0KGgo...",
+            "query": "red dress",  # For text_to_image or multimodal
             "k": 10
         }
 
@@ -1229,55 +1369,43 @@ class IngressDeployment:
         t0 = time.time()
 
         try:
-            # Check if CLIP is available
-            if self.clip_search_handle is None:
+            # Check if vision is available
+            if self.vision_handle is None:
                 return JSONResponse(
-                    {"error": "CLIP search not available", "status": "unavailable"},
+                    {
+                        "error": "Vision search not available. Set VISION_ENABLED=1 and install transformers + pymilvus to enable.",
+                        "status": "unavailable",
+                    },
                     status_code=503,
                 )
 
             # Parse request
             body = await request.json()
-            image_url = body.get("image_url")
-            image_base64 = body.get("image_base64")
             k = body.get("k", 10)
 
-            # Validate input
-            if not image_url and not image_base64:
-                return JSONResponse(
-                    {
-                        "error": "Must provide either image_url or image_base64",
-                        "status": "error",
-                    },
-                    status_code=400,
-                )
-
-            # Call CLIP search deployment
-            clip_request = {
-                "image_url": image_url,
-                "image_base64": image_base64,
-                "k": k * 2,  # Request more for filtering
-            }
-
-            clip_response = await self.clip_search_handle.remote(clip_request)
+            # Call vision deployment
+            vision_result = await self.vision_handle.remote(body)
 
             # Check for errors
-            if clip_response.get("status") == "error":
+            if vision_result.get("status") == "error":
                 return JSONResponse(
                     {
-                        "error": clip_response.get("error", "CLIP search failed"),
+                        "error": vision_result.get("error", "Vision search failed"),
                         "status": "error",
                     },
                     status_code=500,
                 )
 
-            # Get article IDs from CLIP response
-            clip_items = clip_response.get("items", [])
+            # Get article IDs from vision response
+            vision_items = vision_result.get("items", [])
 
             # Enrich with metadata from Redis
             results = []
-            for item in clip_items[:k]:
-                aid = item["item_id"]
+            for item in vision_items[:k]:
+                aid = item.get("article_id")
+                if not aid:
+                    continue
+                    
                 score = item.get("score", 0.0)
 
                 # Get metadata from Redis
@@ -1292,7 +1420,7 @@ class IngressDeployment:
                             )
                             for k, v in raw_meta.items()
                         }
-                        meta = _normalize_meta(aid, raw_meta)
+                        meta, _ = _normalize_meta(aid, raw_meta)
                     else:
                         # Fallback if no metadata
                         meta = {
@@ -1328,6 +1456,7 @@ class IngressDeployment:
                     "items": results,
                     "k": k,
                     "query_time_ms": total_ms,
+                    "mode": vision_result.get("mode", "unknown"),
                     "contract_debug": contract_debug,
                     "status": "success",
                 }
@@ -1339,21 +1468,17 @@ class IngressDeployment:
 
 
 # Bind individual deployment nodes for the Ray Serve application graph
-# Conditional deployment binding based on PERF_TEST_MODE
 router_node = RouterDeployment.bind()
 embedding_node = EmbeddingDeployment.bind()
 retrieval_node = RetrievalDeployment.bind()
 popularity_node = PopularityDeployment.bind()
 reranker_node = RerankerDeployment.bind()
 
-# Disable Generation/CLIP for performance testing
-# This reduces CPU requirements by ~2-3 cores, enabling 2-pod deployment on Docker Desktop
-# To re-enable: uncommment the两 bind() calls below
-generation_node = None  # GenerationDeployment.bind()
-clip_search_node = None  # CLIPSearchDeployment.bind()
+# Phase 3: Enable vision deployment for multimodal search
+generation_node = GenerationDeployment.bind()
+vision_node = VisionDeployment.bind()
 
 # Bind ingress deployment with all dependency handles
-# This creates the complete application graph for Ray Serve
 ingress_app = IngressDeployment.bind(
     router_node,
     embedding_node,
@@ -1361,5 +1486,5 @@ ingress_app = IngressDeployment.bind(
     popularity_node,
     reranker_node,
     generation_node,
-    clip_search_node,
+    vision_node,
 )

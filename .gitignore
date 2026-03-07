@@ -8,6 +8,11 @@
 *.swo
 
 # =========================
+# Git (should never be nested)
+# =========================
+.git/
+
+# =========================
 # Java / Gradle
 # =========================
 .gradle/
@@ -62,6 +67,12 @@ ray_session*/
 cache/
 .cac
 
+# Model caches (HuggingFace, sentence-transformers)
+# These are downloaded on first run
+**/.cache/huggingface/
+**/.cache/torch/
+**/models/
+
 # Test results (keep only final consolidated reports)
 tests/**/test-results/*.md
 test-results/
@@ -90,6 +101,10 @@ data-pipeline/data/**/*.pt
 data-pipeline/data/**/*.bin
 data-pipeline/data/**/*.safetensors
 
+# Phase 3: Vision test data
+data/vision_test/
+data/images/
+
 # Keep important JSON files (like Grafana dashboards, package.json, etc.)
 !observability/grafana/**/*.json
 !**/package.json
@@ -116,3 +131,8 @@ observability/**/data/
 !**/package-lock.json
 docs/production-deployment.md
 gateway-service/CACHING.md
+docs/phase3/*
+docs/contracts/*
+WEEK2_QUICKSTART.md
+docs/*
+WEEK2_CLOSING_PASS_REPORT.md
