@@ -16,13 +16,10 @@ import json
 import threading
 import time
 import urllib.request
-from http.client import HTTPResponse
-from unittest.mock import patch
 
 import pytest
 
 # Suppress prometheus registry duplicate-metric errors across test runs
-from prometheus_client import REGISTRY
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -64,6 +61,7 @@ def _get(port: int, path: str) -> tuple[int, dict | str]:
 # Fixture
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture()
 def server_factory():
     """
@@ -78,6 +76,7 @@ def server_factory():
         # (avoids duplicate-registration errors when the module is imported
         # at collection time in a clean registry).
         import sys
+
         # Ensure we load the src version, not a stale cached one
         sys.path.insert(0, "src")
         from metrics import MetricsServer  # noqa: PLC0415
@@ -107,10 +106,12 @@ def server_factory():
 # Liveness tests
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestLivenessEndpoint:
 
     def test_live_returns_200_when_loop_alive_and_poll_fresh(self, server_factory):
         """Happy-path liveness: loop alive, poll happened 1 s ago."""
+
         def liveness():
             return {
                 "live": True,
@@ -130,6 +131,7 @@ class TestLivenessEndpoint:
 
     def test_live_returns_503_when_loop_dead(self, server_factory):
         """loop_alive=False must cause 503 — the process needs a restart."""
+
         def liveness():
             return {
                 "live": False,
@@ -146,8 +148,11 @@ class TestLivenessEndpoint:
         assert body["live"] is False
         assert body["checks"]["consumer_loop"]["status"] == "dead"
 
-    def test_live_returns_503_when_poll_stale_beyond_liveness_threshold(self, server_factory):
+    def test_live_returns_503_when_poll_stale_beyond_liveness_threshold(
+        self, server_factory
+    ):
         """Poll stale >300 s must cause 503 (genuine process hang)."""
+
         def liveness():
             return {
                 "live": False,
@@ -174,6 +179,7 @@ class TestLivenessEndpoint:
         Before the first consumer.poll() completes, last_poll_ts is None.
         Kubernetes must not restart the pod simply because it hasn't polled yet.
         """
+
         def liveness():
             return {
                 "live": True,
@@ -203,10 +209,12 @@ class TestLivenessEndpoint:
 # Readiness tests
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestReadinessEndpoint:
 
     def test_ready_returns_200_when_all_checks_pass(self, server_factory):
         """Happy-path readiness: all dependencies healthy."""
+
         def readiness():
             return {
                 "healthy": True,
@@ -232,6 +240,7 @@ class TestReadinessEndpoint:
         This should NOT trigger a restart — the pod just exits the rolling-update
         readiness gate until partitions are re-assigned after the rebalance.
         """
+
         def readiness():
             return {
                 "healthy": False,
@@ -255,13 +264,16 @@ class TestReadinessEndpoint:
         assert body["healthy"] is False
         assert body["checks"]["kafka"]["status"] == "no_assignment"
 
-    def test_ready_returns_200_when_redis_fails_informational_only(self, server_factory):
+    def test_ready_returns_200_when_redis_fails_informational_only(
+        self, server_factory
+    ):
         """Redis failure is informational and must not flip the pod to NotReady.
 
         The consumer handles per-message Redis errors via its own retry/DLQ
         pipeline and must remain ready to process (and route to DLQ) even when
         Redis is temporarily unreachable.
         """
+
         def readiness():
             return {
                 "healthy": True,
@@ -294,10 +306,12 @@ class TestReadinessEndpoint:
 # Backward-compat /health
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestHealthBackwardCompat:
 
     def test_health_mirrors_ready_200(self, server_factory):
         """/health returns 200 when readiness check passes."""
+
         def readiness():
             return {
                 "healthy": True,
@@ -313,10 +327,13 @@ class TestHealthBackwardCompat:
 
     def test_health_mirrors_ready_503(self, server_factory):
         """/health returns 503 when readiness check fails."""
+
         def readiness():
             return {
                 "healthy": False,
-                "checks": {"kafka": {"status": "no_assignment", "assigned_partitions": 0}},
+                "checks": {
+                    "kafka": {"status": "no_assignment", "assigned_partitions": 0}
+                },
             }
 
         _, port = server_factory(readiness_fn=readiness)
@@ -329,6 +346,7 @@ class TestHealthBackwardCompat:
     def test_set_health_check_is_alias_for_set_readiness_check(self, server_factory):
         """set_health_check() must be a backward-compat alias for set_readiness_check()."""
         import sys
+
         sys.path.insert(0, "src")
         from metrics import MetricsServer  # noqa: PLC0415
 
@@ -357,6 +375,7 @@ class TestHealthBackwardCompat:
 # Other endpoints
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class TestOtherEndpoints:
 
     def test_metrics_returns_200(self, server_factory):
@@ -382,6 +401,7 @@ class TestOtherEndpoints:
         (liveness OK) but has lost partition assignment (readiness NotReady).
         Kubernetes must NOT restart the pod in this case.
         """
+
         def liveness():
             return {
                 "live": True,

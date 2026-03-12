@@ -69,7 +69,10 @@ def test_load_redis_data_writes_canonical_item_and_meta_keys(monkeypatch):
     assert len(fake_redis.pipeline_instance.hset_calls) == 2
     assert fake_redis.pipeline_instance.hset_calls[0][0] == expected_key
     assert fake_redis.pipeline_instance.hset_calls[1][0] == expected_meta_key
-    assert fake_redis.pipeline_instance.hset_calls[0][1] == fake_redis.pipeline_instance.hset_calls[1][1]
+    assert (
+        fake_redis.pipeline_instance.hset_calls[0][1]
+        == fake_redis.pipeline_instance.hset_calls[1][1]
+    )
     assert fake_redis.pipeline_instance.hset_calls[0][1]["article_id"] == "0000123456"
     assert fake_redis.pipeline_instance.hset_calls[0][1]["prod_name"] == "Green Jacket"
     assert fake_redis.pipeline_instance.hset_calls[0][1]["category"] == "outerwear"

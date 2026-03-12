@@ -19,10 +19,10 @@ os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", "test-kafka:9093")
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from consumer import _CategoryCache, EventConsumer, ProcessingResult
-
+from consumer import _CategoryCache, EventConsumer
 
 # ── _CategoryCache unit tests ─────────────────────────────────────────────────
+
 
 class TestCategoryCacheGet:
     def test_miss_on_empty_cache(self):
@@ -123,13 +123,15 @@ class TestCategoryCacheLRUEviction:
 
 # ── Integration: _infer_category uses the cache ───────────────────────────────
 
+
 @pytest.fixture
 def consumer_ctx():
     """Minimal consumer fixture for testing _infer_category."""
-    with patch("consumer.MetricsServer"), \
-         patch("consumer.redis.Redis") as mock_redis_cls, \
-         patch("consumer.KafkaConsumer"), \
-         patch("consumer.KafkaProducer"):
+    with patch("consumer.MetricsServer"), patch(
+        "consumer.redis.Redis"
+    ) as mock_redis_cls, patch("consumer.KafkaConsumer"), patch(
+        "consumer.KafkaProducer"
+    ):
 
         redis_client = Mock()
         redis_client.ping.return_value = True

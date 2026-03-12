@@ -22,7 +22,10 @@ sys.modules.setdefault("torch.nn", nn_stub)
 sys.modules.setdefault("torch.nn.functional", functional_stub)
 sys.modules.setdefault("transformers", transformers_stub)
 
-from src.deployments.embedding import EmbeddingDeployment, EMBEDDING_MAX_ONGOING_REQUESTS
+from src.deployments.embedding import (  # noqa: E402
+    EmbeddingDeployment,
+    EMBEDDING_MAX_ONGOING_REQUESTS,
+)
 
 
 def test_embedding_deployment_has_bounded_serve_concurrency():

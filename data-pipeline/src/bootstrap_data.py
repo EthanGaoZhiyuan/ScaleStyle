@@ -45,7 +45,12 @@ from pymilvus import (
 )
 from tqdm import tqdm
 
-from src.redis_metadata import build_item_metadata, canonical_article_id, item_key, item_meta_key
+from src.redis_metadata import (
+    build_item_metadata,
+    canonical_article_id,
+    item_key,
+    item_meta_key,
+)
 
 # Default configuration (can be overridden by environment variables)
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")

@@ -9,7 +9,9 @@ if not KAFKA_BOOTSTRAP_SERVERS:
     raise RuntimeError("KAFKA_BOOTSTRAP_SERVERS must be explicitly set")
 KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "scalestyle.clicks")
 KAFKA_AUTO_OFFSET_RESET = os.getenv("KAFKA_AUTO_OFFSET_RESET", "earliest")
-KAFKA_DLQ_TOPIC = os.getenv("KAFKA_DLQ_TOPIC", "scalestyle.clicks.dlq")  # Dead Letter Queue
+KAFKA_DLQ_TOPIC = os.getenv(
+    "KAFKA_DLQ_TOPIC", "scalestyle.clicks.dlq"
+)  # Dead Letter Queue
 KAFKA_RETRY_HEADER = os.getenv("KAFKA_RETRY_HEADER", "x-retry-count")
 KAFKA_TRACEPARENT_HEADER = os.getenv("KAFKA_TRACEPARENT_HEADER", "traceparent")
 KAFKA_TRACESTATE_HEADER = os.getenv("KAFKA_TRACESTATE_HEADER", "tracestate")
@@ -25,8 +27,12 @@ KAFKA_POLL_MAX_RECORDS = int(os.getenv("KAFKA_POLL_MAX_RECORDS", "100"))
 # - retry worker consumes all retry tiers
 # - failures cascade retry-1s -> retry-10s -> retry-60s -> DLQ
 KAFKA_RETRY_TOPIC_1S = os.getenv("KAFKA_RETRY_TOPIC_1S", "scalestyle.clicks.retry.1s")
-KAFKA_RETRY_TOPIC_10S = os.getenv("KAFKA_RETRY_TOPIC_10S", "scalestyle.clicks.retry.10s")
-KAFKA_RETRY_TOPIC_60S = os.getenv("KAFKA_RETRY_TOPIC_60S", "scalestyle.clicks.retry.60s")
+KAFKA_RETRY_TOPIC_10S = os.getenv(
+    "KAFKA_RETRY_TOPIC_10S", "scalestyle.clicks.retry.10s"
+)
+KAFKA_RETRY_TOPIC_60S = os.getenv(
+    "KAFKA_RETRY_TOPIC_60S", "scalestyle.clicks.retry.60s"
+)
 # Backward-compat alias for code/tests that still refer to the "first" retry topic.
 KAFKA_RETRY_TOPIC = KAFKA_RETRY_TOPIC_1S
 KAFKA_RETRY_TIERS = [
@@ -81,7 +87,9 @@ REDIS_MAX_CONNECTIONS = int(os.getenv("REDIS_MAX_CONNECTIONS", "50"))
 # Timeout Configuration (defense-in-depth)
 # socket_connect_timeout: TCP handshake timeout
 # socket_timeout: Command execution timeout (read/write)
-REDIS_SOCKET_CONNECT_TIMEOUT_SEC = float(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", "0.5"))
+REDIS_SOCKET_CONNECT_TIMEOUT_SEC = float(
+    os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", "0.5")
+)
 REDIS_SOCKET_TIMEOUT_SEC = float(os.getenv("REDIS_SOCKET_TIMEOUT", "0.2"))
 
 # Health Check Configuration
@@ -97,7 +105,9 @@ REDIS_RETRY_ON_TIMEOUT = os.getenv("REDIS_RETRY_ON_TIMEOUT", "False").lower() ==
 DEDUPE_WINDOW_SECONDS = int(
     os.getenv("DEDUPE_WINDOW_SECONDS", "604800")
 )  # 7 days (matches Kafka retention)
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))  # Max retry attempts for transient failures
+MAX_RETRIES = int(
+    os.getenv("MAX_RETRIES", "3")
+)  # Max retry attempts for transient failures
 DLQ_DEDUPE_TTL_SECONDS = int(
     os.getenv("DLQ_DEDUPE_TTL_SECONDS", str(DEDUPE_WINDOW_SECONDS))
 )  # Keep DLQ dedupe key for the same retention window
@@ -112,14 +122,24 @@ if MAX_RETRIES > len(KAFKA_RETRY_TIERS):
 # Safe default: retry tier names must correspond to elapsed delay in all standard
 # deployments. Immediate retry processing is allowed only as an explicit local/dev
 # override because it can exhaust all retry tiers almost instantly.
-RETRY_ENFORCE_DELAY = os.getenv("RETRY_ENFORCE_DELAY", "true").lower() in ("1", "true", "yes")
-ALLOW_UNSAFE_IMMEDIATE_RETRY = os.getenv("ALLOW_UNSAFE_IMMEDIATE_RETRY", "false").lower() in (
+RETRY_ENFORCE_DELAY = os.getenv("RETRY_ENFORCE_DELAY", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+ALLOW_UNSAFE_IMMEDIATE_RETRY = os.getenv(
+    "ALLOW_UNSAFE_IMMEDIATE_RETRY", "false"
+).lower() in (
     "1",
     "true",
     "yes",
 )
 
-if CONSUMER_MODE == "retry" and not RETRY_ENFORCE_DELAY and not ALLOW_UNSAFE_IMMEDIATE_RETRY:
+if (
+    CONSUMER_MODE == "retry"
+    and not RETRY_ENFORCE_DELAY
+    and not ALLOW_UNSAFE_IMMEDIATE_RETRY
+):
     raise RuntimeError(
         "Retry consumer cannot run with RETRY_ENFORCE_DELAY=false unless "
         "ALLOW_UNSAFE_IMMEDIATE_RETRY=true is also set. "
@@ -152,9 +172,15 @@ CATEGORY_AFFINITY_HALF_LIFE_DAYS = float(
     )
 )
 ITEM_CLICK_HALF_LIFE_HOURS = float(os.getenv("ITEM_CLICK_HALF_LIFE_HOURS", "72"))
-RECENT_ITEM_CLICK_HALF_LIFE_HOURS = float(os.getenv("RECENT_ITEM_CLICK_HALF_LIFE_HOURS", "24"))
-GLOBAL_POPULARITY_HALF_LIFE_HOURS = float(os.getenv("GLOBAL_POPULARITY_HALF_LIFE_HOURS", "48"))
-ONLINE_FEATURE_STATE_TTL_SECONDS = int(os.getenv("ONLINE_FEATURE_STATE_TTL_SECONDS", str(90 * 86400)))
+RECENT_ITEM_CLICK_HALF_LIFE_HOURS = float(
+    os.getenv("RECENT_ITEM_CLICK_HALF_LIFE_HOURS", "24")
+)
+GLOBAL_POPULARITY_HALF_LIFE_HOURS = float(
+    os.getenv("GLOBAL_POPULARITY_HALF_LIFE_HOURS", "48")
+)
+ONLINE_FEATURE_STATE_TTL_SECONDS = int(
+    os.getenv("ONLINE_FEATURE_STATE_TTL_SECONDS", str(90 * 86400))
+)
 
 CATEGORY_AFFINITY_DECAY_LAMBDA = _LN2 / (CATEGORY_AFFINITY_HALF_LIFE_DAYS * 86400.0)
 ITEM_CLICK_DECAY_LAMBDA = _LN2 / (ITEM_CLICK_HALF_LIFE_HOURS * 3600.0)
@@ -167,13 +193,25 @@ GLOBAL_POPULARITY_DECAY_LAMBDA = _LN2 / (GLOBAL_POPULARITY_HALF_LIFE_HOURS * 360
 #   the consumer writes to keys that the inference service reads from.
 #   Default: "popularity:bucket" (matches inference service default)
 POPULARITY_BUCKET_PREFIX = os.getenv("POPULARITY_BUCKET_PREFIX", "popularity:bucket")
-POPULARITY_1H_BUCKET_SECONDS = int(os.getenv("POPULARITY_1H_BUCKET_SECONDS", "300"))      # 5 min buckets
-POPULARITY_24H_BUCKET_SECONDS = int(os.getenv("POPULARITY_24H_BUCKET_SECONDS", "3600"))   # 1 hour buckets
-POPULARITY_7D_BUCKET_SECONDS = int(os.getenv("POPULARITY_7D_BUCKET_SECONDS", "86400"))    # 1 day buckets
+POPULARITY_1H_BUCKET_SECONDS = int(
+    os.getenv("POPULARITY_1H_BUCKET_SECONDS", "300")
+)  # 5 min buckets
+POPULARITY_24H_BUCKET_SECONDS = int(
+    os.getenv("POPULARITY_24H_BUCKET_SECONDS", "3600")
+)  # 1 hour buckets
+POPULARITY_7D_BUCKET_SECONDS = int(
+    os.getenv("POPULARITY_7D_BUCKET_SECONDS", "86400")
+)  # 1 day buckets
 
-POPULARITY_1H_BUCKET_TTL_SECONDS = int(os.getenv("POPULARITY_1H_BUCKET_TTL_SECONDS", "7200"))
-POPULARITY_24H_BUCKET_TTL_SECONDS = int(os.getenv("POPULARITY_24H_BUCKET_TTL_SECONDS", "172800"))
-POPULARITY_7D_BUCKET_TTL_SECONDS = int(os.getenv("POPULARITY_7D_BUCKET_TTL_SECONDS", str(14 * 86400)))
+POPULARITY_1H_BUCKET_TTL_SECONDS = int(
+    os.getenv("POPULARITY_1H_BUCKET_TTL_SECONDS", "7200")
+)
+POPULARITY_24H_BUCKET_TTL_SECONDS = int(
+    os.getenv("POPULARITY_24H_BUCKET_TTL_SECONDS", "172800")
+)
+POPULARITY_7D_BUCKET_TTL_SECONDS = int(
+    os.getenv("POPULARITY_7D_BUCKET_TTL_SECONDS", str(14 * 86400))
+)
 
 # Observability Configuration
 METRICS_PORT = int(os.getenv("METRICS_PORT", "8000"))  # HTTP metrics endpoint port

@@ -3,17 +3,13 @@ import os
 import pandas as pd
 import redis
 from pymilvus import MilvusClient
-from tqdm import tqdm
 
 from bootstrap_data import load_redis_data
-
 from config import (
     ARTICLE_EMBEDDINGS_PATH,
     MILVUS_COLLECTION,
     MILVUS_HOST,
     MILVUS_PORT,
-    POPULARITY_KEY,
-    POPULARITY_TOPN,
     REDIS_HOST,
     REDIS_PORT,
     REDIS_TLS,

@@ -91,7 +91,9 @@ def setup_tracing(service_name: str = "event-consumer") -> Any:
         logger.info("OpenTelemetry traces exporter disabled for %s", service_name)
         return trace.get_tracer(service_name)
 
-    otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://jaeger-collector:4317")
+    otlp_endpoint = os.getenv(
+        "OTEL_EXPORTER_OTLP_ENDPOINT", "http://jaeger-collector:4317"
+    )
     insecure = otlp_endpoint.startswith("http://")
 
     resource = Resource.create(
@@ -111,5 +113,7 @@ def setup_tracing(service_name: str = "event-consumer") -> Any:
     )
     trace.set_tracer_provider(provider)
     _tracer_initialized = True
-    logger.info("OpenTelemetry tracing initialized for %s -> %s", service_name, otlp_endpoint)
+    logger.info(
+        "OpenTelemetry tracing initialized for %s -> %s", service_name, otlp_endpoint
+    )
     return trace.get_tracer(service_name)

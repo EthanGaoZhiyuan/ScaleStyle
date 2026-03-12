@@ -4,6 +4,7 @@ Redis Client - Production-grade connection pool and configuration
 Provides structured logging, timeouts, connection pooling, and health checks
 for Ray Serve replicas.
 """
+
 import logging
 import threading
 import redis
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 class RedisClient:
     """
     Singleton Redis client with production-grade configuration.
-    
+
     Features:
     - Connection pooling for concurrent Ray Serve replicas
     - Socket and connect timeouts to prevent hang
@@ -23,6 +24,7 @@ class RedisClient:
     - Structured logging instead of print statements
     - Proper error handling and retry configuration
     """
+
     _instance = None
     _client = None
     _lock = threading.Lock()  # Protect concurrent initialization
@@ -32,7 +34,7 @@ class RedisClient:
         """
         Get or create Redis client with connection pool.
         Thread-safe singleton with double-checked locking.
-        
+
         Returns:
             redis.Redis: Configured Redis client instance
         """
@@ -45,7 +47,7 @@ class RedisClient:
                         RedisConfig.HOST,
                         RedisConfig.PORT,
                     )
-                    
+
                     try:
                         # Create connection pool for the Ray Serve hot path.
                         #
@@ -72,21 +74,23 @@ class RedisClient:
                             port=RedisConfig.PORT,
                             decode_responses=True,
                             socket_connect_timeout=0.02,  # 20 ms — fail-fast on new connections
-                            socket_timeout=0.01,          # 10 ms — matches p99 personalization SLO
-                            max_connections=128,           # support concurrent Ray Serve replicas
-                            health_check_interval=30,      # keep idle connections alive
-                            retry_on_timeout=False,        # NO implicit retry — see note above
+                            socket_timeout=0.01,  # 10 ms — matches p99 personalization SLO
+                            max_connections=128,  # support concurrent Ray Serve replicas
+                            health_check_interval=30,  # keep idle connections alive
+                            retry_on_timeout=False,  # NO implicit retry — see note above
                             ssl=RedisConfig.TLS,
                             ssl_cert_reqs="required" if RedisConfig.TLS else None,
                         )
-                        
+
                         cls._client = redis.Redis(connection_pool=pool)
                         logger.info("✅ Redis connection pool initialized successfully")
-                        
+
                     except Exception as e:
-                        logger.error("❌ Failed to connect to Redis: %s", e, exc_info=True)
+                        logger.error(
+                            "❌ Failed to connect to Redis: %s", e, exc_info=True
+                        )
                         raise
-        
+
         return cls._client
 
 
@@ -110,7 +114,7 @@ def validate_startup_connection() -> redis.Redis:
             RedisConfig.PORT,
         )
         return client
-    except Exception as exc:
+    except Exception:
         logger.error(
             "Redis startup validation failed: host=%s, port=%s",
             RedisConfig.HOST,

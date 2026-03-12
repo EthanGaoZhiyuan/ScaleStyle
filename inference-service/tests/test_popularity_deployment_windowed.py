@@ -57,7 +57,9 @@ class _DummyRedis:
 
     def pipeline(self, transaction=False):
         if transaction:
-            raise AssertionError("popularity path should use non-transactional pipeline")
+            raise AssertionError(
+                "popularity path should use non-transactional pipeline"
+            )
         if not self._pipeline_results:
             raise AssertionError("No pipeline result configured")
         return _DummyPipeline(self._pipeline_results.pop(0))
@@ -67,7 +69,9 @@ class _DummyRedis:
         return values if withscores else [item_id for item_id, _ in values]
 
 
-def test_popularity_topk_prefers_primary_window_and_falls_back_to_secondary(monkeypatch):
+def test_popularity_topk_prefers_primary_window_and_falls_back_to_secondary(
+    monkeypatch,
+):
     redis_client = _DummyRedis()
 
     primary_key = "popularity:materialized:24h:test"
@@ -78,10 +82,18 @@ def test_popularity_topk_prefers_primary_window_and_falls_back_to_secondary(monk
         [{"article_id": "stale_item", "detail_desc": "older but still relevant"}],
     ]
 
-    monkeypatch.setattr("src.deployments.popularity.RedisClient.get_client", lambda: redis_client)
+    monkeypatch.setattr(
+        "src.deployments.popularity.RedisClient.get_client", lambda: redis_client
+    )
 
     deployment = PopularityDeployment()
-    monkeypatch.setattr(deployment, "_ensure_materialized_window", lambda window_name, now_ts=None: primary_key if window_name == "24h" else secondary_key)
+    monkeypatch.setattr(
+        deployment,
+        "_ensure_materialized_window",
+        lambda window_name, now_ts=None: (
+            primary_key if window_name == "24h" else secondary_key
+        ),
+    )
     results = asyncio.run(deployment.topk(1))
 
     assert results[0]["article_id"] == "stale_item"
@@ -93,7 +105,9 @@ def test_materialized_window_rebuild_uses_short_redis_lease(monkeypatch):
     redis_client.set_results = [True]
     redis_client._pipeline_results = [None]
 
-    monkeypatch.setattr("src.deployments.popularity.RedisClient.get_client", lambda: redis_client)
+    monkeypatch.setattr(
+        "src.deployments.popularity.RedisClient.get_client", lambda: redis_client
+    )
 
     deployment = PopularityDeployment()
     materialized_key = deployment._ensure_materialized_window("24h", now_ts=3600.0)
@@ -106,7 +120,9 @@ def test_materialized_window_skips_duplicate_rebuild_when_peer_holds_lease(monke
     redis_client = _DummyRedis()
     redis_client.set_results = [False]
 
-    monkeypatch.setattr("src.deployments.popularity.RedisClient.get_client", lambda: redis_client)
+    monkeypatch.setattr(
+        "src.deployments.popularity.RedisClient.get_client", lambda: redis_client
+    )
 
     deployment = PopularityDeployment()
     materialized_key = deployment._ensure_materialized_window("24h", now_ts=3600.0)

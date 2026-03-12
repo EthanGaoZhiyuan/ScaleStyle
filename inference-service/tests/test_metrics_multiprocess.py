@@ -38,7 +38,9 @@ def test_gauge_uses_livesum_mode_in_multiprocess(metrics_module, monkeypatch):
     assert captured["kwargs"]["multiprocess_mode"] == "livesum"
 
 
-def test_generate_latest_metrics_uses_multiprocess_collector(metrics_module, monkeypatch):
+def test_generate_latest_metrics_uses_multiprocess_collector(
+    metrics_module, monkeypatch
+):
     collector_calls = []
     generated = []
 
@@ -77,19 +79,40 @@ def test_ingress_metrics_endpoint_exports_shared_metrics(monkeypatch):
     monkeypatch.setitem(sys.modules, "src.utils.observability", observability_stub)
 
     monkeypatch.setattr("src.deployments.ingress._redis_client", lambda: DummyRedis())
-    monkeypatch.setattr("src.deployments.ingress.generate_latest_metrics", lambda: b"shared-metrics")
+    monkeypatch.setattr(
+        "src.deployments.ingress.generate_latest_metrics", lambda: b"shared-metrics"
+    )
 
     from src.deployments.ingress import IngressDeployment
 
-    router = FakeHandle(route=lambda q, user_id=None: {"intent": "SEARCH", "filters": {}, "flow": "smart"})
+    router = FakeHandle(
+        route=lambda q, user_id=None: {
+            "intent": "SEARCH",
+            "filters": {},
+            "flow": "smart",
+        }
+    )
     embed = FakeHandle(embed=lambda q, is_query=True: [0.1, 0.2, 0.3])
     retrieval = FakeHandle(search=lambda vector, **kw: [])
     popularity = FakeHandle(topk=lambda k: [])
-    reranker = FakeHandle(score=lambda q, docs: {"scores": [], "rerank_ms": 1, "mode": "stub"})
-    generation = FakeHandle(explain=lambda q, item: {"reason": "test", "gen_ms": 1, "model": "stub", "device": "cpu"})
+    reranker = FakeHandle(
+        score=lambda q, docs: {"scores": [], "rerank_ms": 1, "mode": "stub"}
+    )
+    generation = FakeHandle(
+        explain=lambda q, item: {
+            "reason": "test",
+            "gen_ms": 1,
+            "model": "stub",
+            "device": "cpu",
+        }
+    )
 
-    deployment = IngressDeployment(router, embed, retrieval, popularity, reranker, generation)
-    request = SimpleNamespace(url=SimpleNamespace(path="/metrics"), headers={}, method="GET")
+    deployment = IngressDeployment(
+        router, embed, retrieval, popularity, reranker, generation
+    )
+    request = SimpleNamespace(
+        url=SimpleNamespace(path="/metrics"), headers={}, method="GET"
+    )
 
     response = asyncio.run(deployment(request))
 

@@ -51,9 +51,10 @@ class LegacyFeatureReader(FeatureReader):
 
         t0 = time.perf_counter()
         try:
-            items = self.redis.lrange(
-                f"user:{user_id}:recent_clicks", 0, max_items - 1
-            ) or []
+            items = (
+                self.redis.lrange(f"user:{user_id}:recent_clicks", 0, max_items - 1)
+                or []
+            )
             if items and isinstance(items[0], bytes):
                 items = [item.decode("utf-8") for item in items]
             _record_feature_read(_FEATURE, "success")
@@ -61,7 +62,9 @@ class LegacyFeatureReader(FeatureReader):
         except (redis.TimeoutError, redis.ConnectionError, Exception) as e:
             logger.warning(
                 "feature_read_error feature=%s user_id=%s err=%s",
-                _FEATURE, user_id, e,
+                _FEATURE,
+                user_id,
+                e,
             )
             _record_feature_read(_FEATURE, "error")
             return []
@@ -113,7 +116,9 @@ class LegacyFeatureReader(FeatureReader):
         except (redis.TimeoutError, redis.ConnectionError, Exception) as e:
             logger.warning(
                 "feature_read_error feature=%s user_id=%s err=%s",
-                _FEATURE, user_id, e,
+                _FEATURE,
+                user_id,
+                e,
             )
             _record_feature_read(_FEATURE, "error")
             return {}
@@ -144,7 +149,9 @@ class LegacyFeatureReader(FeatureReader):
         except (redis.TimeoutError, redis.ConnectionError, Exception) as e:
             logger.warning(
                 "feature_read_error feature=%s batch_size=%d err=%s",
-                _FEATURE, len(item_ids), e,
+                _FEATURE,
+                len(item_ids),
+                e,
             )
             _record_feature_read(_FEATURE, "error")
             return {}
@@ -163,9 +170,10 @@ class LegacyFeatureReader(FeatureReader):
 
         t0 = time.perf_counter()
         try:
-            items = self.redis.lrange(
-                f"session:{session_id}:clicks", 0, max_items - 1
-            ) or []
+            items = (
+                self.redis.lrange(f"session:{session_id}:clicks", 0, max_items - 1)
+                or []
+            )
             if items and isinstance(items[0], bytes):
                 items = [item.decode("utf-8") for item in items]
             _record_feature_read(_FEATURE, "success")
@@ -173,7 +181,9 @@ class LegacyFeatureReader(FeatureReader):
         except (redis.TimeoutError, redis.ConnectionError, Exception) as e:
             logger.warning(
                 "feature_read_error feature=%s session_id=%s err=%s",
-                _FEATURE, session_id, e,
+                _FEATURE,
+                session_id,
+                e,
             )
             _record_feature_read(_FEATURE, "error")
             return []
@@ -192,9 +202,7 @@ class LegacyFeatureReader(FeatureReader):
         t0 = time.perf_counter()
         try:
             now_ts = time.time()
-            materialized_keys, _ = self._resolve_materialized_popularity_windows(
-                now_ts
-            )
+            materialized_keys, _ = self._resolve_materialized_popularity_windows(now_ts)
             pipe = self.redis.pipeline(transaction=False)
             for window_name in ("1h", "24h", "7d"):
                 pipe.zmscore(materialized_keys[window_name], item_ids)
@@ -213,7 +221,9 @@ class LegacyFeatureReader(FeatureReader):
         except (redis.TimeoutError, redis.ConnectionError, Exception) as e:
             logger.warning(
                 "feature_read_error feature=%s item_count=%d err=%s",
-                _FEATURE, len(item_ids), e,
+                _FEATURE,
+                len(item_ids),
+                e,
             )
             _record_feature_read(_FEATURE, "error")
             return {}

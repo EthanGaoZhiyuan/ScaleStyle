@@ -23,7 +23,6 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import List, Dict
 
 import pandas as pd
 from pymilvus import (
@@ -61,7 +60,7 @@ class MilvusImageCollection:
         """
         self.collection_name = collection_name
         self.dim = dim
-        
+
         # Connect to Milvus
         logger.info(f"Connecting to Milvus at {host}:{port}")
         connections.connect(
@@ -70,20 +69,20 @@ class MilvusImageCollection:
             port=port,
         )
         logger.info("✅ Connected to Milvus")
-        
+
         self.collection = None
 
     def create_collection(self, drop_existing: bool = False):
         """
         Create Milvus collection for image embeddings
-        
+
         Schema:
         - article_id (VARCHAR, primary key): H&M article ID
         - vector (FLOAT_VECTOR, dim=512): FashionCLIP embedding
         - image_path (VARCHAR): Relative path to image
         - width (INT32): Image width
         - height (INT32): Image height
-        
+
         Index: HNSW for fast ANN search
         """
         # Check if collection exists
@@ -95,7 +94,7 @@ class MilvusImageCollection:
                 logger.info(f"Collection {self.collection_name} already exists")
                 self.collection = Collection(self.collection_name)
                 return
-        
+
         # Define schema
         fields = [
             FieldSchema(
@@ -129,12 +128,12 @@ class MilvusImageCollection:
                 description="Image height in pixels",
             ),
         ]
-        
+
         schema = CollectionSchema(
             fields=fields,
             description="ScaleStyle FashionCLIP image embeddings",
         )
-        
+
         # Create collection
         logger.info(f"Creating collection: {self.collection_name}")
         self.collection = Collection(
@@ -142,7 +141,7 @@ class MilvusImageCollection:
             schema=schema,
         )
         logger.info("✅ Collection created")
-        
+
         # Create HNSW index for fast search
         logger.info("Creating HNSW index on vector field...")
         index_params = {
@@ -153,13 +152,13 @@ class MilvusImageCollection:
                 "efConstruction": 200,  # Build-time search depth
             },
         }
-        
+
         self.collection.create_index(
             field_name="vector",
             index_params=index_params,
         )
         logger.info("✅ HNSW index created")
-        
+
         # Load collection into memory
         self.collection.load()
         logger.info("✅ Collection loaded into memory")
@@ -172,7 +171,7 @@ class MilvusImageCollection:
     ):
         """
         Ingest embeddings from parquet file
-        
+
         Args:
             parquet_path: Path to parquet file from image_etl.py
             batch_size: Number of records per batch insert
@@ -180,49 +179,53 @@ class MilvusImageCollection:
         """
         if not parquet_path.exists():
             raise FileNotFoundError(f"Parquet file not found: {parquet_path}")
-        
+
         # Ensure collection exists and is loaded
         if self.collection is None:
             self.collection = Collection(self.collection_name)
-        
+
         if not utility.has_collection(self.collection_name):
-            raise RuntimeError(f"Collection {self.collection_name} does not exist. Run with --mode create first.")
-        
+            raise RuntimeError(
+                f"Collection {self.collection_name} does not exist. Run with --mode create first."
+            )
+
         # Load collection if not already loaded
         logger.info("Loading collection...")
         self.collection.load()
-        
+
         # Read parquet
         logger.info(f"Reading parquet from {parquet_path}")
         df = pd.read_parquet(parquet_path)
-        
+
         if limit:
             df = df.head(limit)
-        
+
         total_rows = len(df)
         logger.info(f"Found {total_rows} records to ingest")
-        
+
         # Validate schema
         required_cols = ["image_id", "embedding", "image_path", "width", "height"]
         missing = [c for c in required_cols if c not in df.columns]
         if missing:
             raise ValueError(f"Missing columns in parquet: {missing}")
-        
+
         # Validate embedding dimension
         sample_emb = df.iloc[0]["embedding"]
         if len(sample_emb) != self.dim:
-            raise ValueError(f"Expected {self.dim}-d embeddings, got {len(sample_emb)}-d")
-        
+            raise ValueError(
+                f"Expected {self.dim}-d embeddings, got {len(sample_emb)}-d"
+            )
+
         # Ingest in batches
         num_batches = (total_rows + batch_size - 1) // batch_size
         logger.info(f"Ingesting in {num_batches} batches of {batch_size}")
-        
+
         start_time = time.time()
         total_inserted = 0
-        
+
         for i in range(0, total_rows, batch_size):
             batch_df = df.iloc[i : i + batch_size]
-            
+
             # Prepare data for Milvus
             data = [
                 batch_df["image_id"].tolist(),  # article_id
@@ -231,29 +234,31 @@ class MilvusImageCollection:
                 batch_df["width"].tolist(),  # width
                 batch_df["height"].tolist(),  # height
             ]
-            
+
             # Insert batch
             self.collection.insert(data)
             total_inserted += len(batch_df)
-            
+
             if (i // batch_size + 1) % 10 == 0:
-                logger.info(f"Progress: {total_inserted}/{total_rows} ({total_inserted/total_rows*100:.1f}%)")
-        
+                logger.info(
+                    f"Progress: {total_inserted}/{total_rows} ({total_inserted/total_rows*100:.1f}%)"
+                )
+
         elapsed = time.time() - start_time
         throughput = total_inserted / elapsed if elapsed > 0 else 0
-        
+
         logger.info(f"\n{'='*60}")
-        logger.info(f"✅ Ingestion complete!")
+        logger.info("✅ Ingestion complete!")
         logger.info(f"   Total inserted: {total_inserted}")
         logger.info(f"   Time elapsed: {elapsed:.2f}s")
         logger.info(f"   Throughput: {throughput:.1f} records/s")
         logger.info(f"{'='*60}\n")
-        
+
         # Flush to ensure persistence
         logger.info("Flushing collection...")
         self.collection.flush()
         logger.info("✅ Collection flushed")
-        
+
         # Verify count
         count = self.collection.num_entities
         logger.info(f"✅ Collection now has {count} entities")
@@ -261,27 +266,27 @@ class MilvusImageCollection:
     def test_search(self, k: int = 5):
         """
         Test search with a random vector
-        
+
         Args:
             k: Number of results to return
         """
         import numpy as np
-        
+
         if self.collection is None:
             self.collection = Collection(self.collection_name)
             self.collection.load()
-        
+
         # Generate random normalized vector
         random_vector = np.random.rand(self.dim).astype(np.float32)
         random_vector = random_vector / np.linalg.norm(random_vector)
-        
+
         logger.info(f"\nTesting search with k={k}")
-        
+
         search_params = {
             "metric_type": "IP",
             "params": {"ef": 100},  # HNSW search parameter
         }
-        
+
         start_time = time.time()
         results = self.collection.search(
             data=[random_vector.tolist()],
@@ -291,12 +296,14 @@ class MilvusImageCollection:
             output_fields=["article_id", "image_path", "width", "height"],
         )
         search_time = (time.time() - start_time) * 1000  # ms
-        
+
         logger.info(f"Search completed in {search_time:.2f}ms")
         logger.info(f"\nTop {k} results:")
         for i, hit in enumerate(results[0]):
-            logger.info(f"  {i+1}. article_id={hit.entity.get('article_id')}, score={hit.score:.4f}")
-        
+            logger.info(
+                f"  {i+1}. article_id={hit.entity.get('article_id')}, score={hit.score:.4f}"
+            )
+
         return results
 
 
@@ -351,24 +358,24 @@ def main():
         action="store_true",
         help="Drop existing collection before creating (WARNING: deletes all data)",
     )
-    
+
     args = parser.parse_args()
-    
+
     # Validate inputs
     if args.mode in ["ingest", "full"] and not args.parquet_path:
         parser.error("--parquet_path is required for ingest/full modes")
-    
+
     # Initialize manager
     manager = MilvusImageCollection(
         collection_name=args.collection_name,
         host=args.host,
         port=args.port,
     )
-    
+
     # Execute mode
     if args.mode in ["create", "full"]:
         manager.create_collection(drop_existing=args.drop_existing)
-    
+
     if args.mode in ["ingest", "full"]:
         parquet_path = Path(args.parquet_path)
         manager.ingest_parquet(
@@ -376,10 +383,10 @@ def main():
             batch_size=args.batch_size,
             limit=args.limit,
         )
-    
+
     if args.mode == "test":
         manager.test_search(k=5)
-    
+
     logger.info("\n✅ All operations completed successfully!")
 
 

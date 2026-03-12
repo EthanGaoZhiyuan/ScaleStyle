@@ -1,6 +1,5 @@
 from ray import serve
 import re
-from typing import Optional
 
 from src.utils.bucketing import bucket_user
 

@@ -2,12 +2,13 @@ import sys
 from pathlib import Path
 from unittest.mock import Mock
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from personalization.feature_reader_legacy import LegacyFeatureReader
-from personalization.popularity_windows import active_bucket_keys, materialized_window_key
+from personalization.popularity_windows import (
+    active_bucket_keys,
+    materialized_window_key,
+)
 
 
 def test_window_rollover_changes_materialized_key():

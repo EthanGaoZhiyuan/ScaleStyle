@@ -1,7 +1,6 @@
 """
 Tests for personalization fallback paths and degradation reason propagation.
 """
-import pytest
 
 from src.degradation import DegradationReason
 from src.personalization import NullFeatureReader

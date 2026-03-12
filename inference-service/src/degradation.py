@@ -4,6 +4,7 @@ Canonical degradation reason vocabulary.
 Contract: docs/DEGRADATION_REASONS.md.
 Use these values for logs, metrics, and API response metadata.
 """
+
 from enum import Enum
 
 

@@ -8,8 +8,8 @@ observability_stub = ModuleType("src.utils.observability")
 observability_stub.setup_tracing = lambda *args, **kwargs: None
 sys.modules.setdefault("src.utils.observability", observability_stub)
 
-from deployments.ingress import IngressDeployment
-from tests.utils import FakeHandle
+from deployments.ingress import IngressDeployment  # noqa: E402
+from tests.utils import FakeHandle  # noqa: E402
 
 
 class _DummyRedis:
@@ -40,12 +40,27 @@ class _DummyThread:
 
 def _build_ingress(monkeypatch):
     monkeypatch.setattr("deployments.ingress._redis_client", lambda: _DummyRedis())
-    router = FakeHandle(route=lambda q, user_id=None: {"intent": "SEARCH", "filters": {}, "flow": "smart"})
+    router = FakeHandle(
+        route=lambda q, user_id=None: {
+            "intent": "SEARCH",
+            "filters": {},
+            "flow": "smart",
+        }
+    )
     embed = FakeHandle(embed=lambda q, is_query=True: [0.1, 0.2, 0.3])
     retrieval = FakeHandle(search=lambda vector, **kw: [])
     popularity = FakeHandle(topk=lambda k: [])
-    reranker = FakeHandle(score=lambda q, docs: {"scores": [], "rerank_ms": 1, "mode": "stub"})
-    generation = FakeHandle(explain=lambda q, item: {"reason": "test", "gen_ms": 1, "model": "stub", "device": "cpu"})
+    reranker = FakeHandle(
+        score=lambda q, docs: {"scores": [], "rerank_ms": 1, "mode": "stub"}
+    )
+    generation = FakeHandle(
+        explain=lambda q, item: {
+            "reason": "test",
+            "gen_ms": 1,
+            "model": "stub",
+            "device": "cpu",
+        }
+    )
     return IngressDeployment(router, embed, retrieval, popularity, reranker, generation)
 
 

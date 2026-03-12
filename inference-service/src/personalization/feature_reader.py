@@ -8,6 +8,7 @@ in the reranker or serving code.
 For legacy fine-grained readers (debug/admin only), use LegacyFeatureReader
 from feature_reader_legacy.
 """
+
 import logging
 import math
 import threading
@@ -26,7 +27,10 @@ from src.personalization.metrics import (
     snapshot_load_total,
     snapshot_redis_round_trips,
 )
-from src.personalization.popularity_windows import active_bucket_keys, materialized_window_key
+from src.personalization.popularity_windows import (
+    active_bucket_keys,
+    materialized_window_key,
+)
 from src.personalization.snapshot import PersonalizationSnapshot
 from src.utils.redis_metadata import canonical_article_id, item_meta_key
 
@@ -64,9 +68,13 @@ class FeatureReader:
         # Events to signal when a window rebuild completes (avoids sleep-in-lock)
         self._rebuild_events: Dict[str, threading.Event] = {}
 
-    def _resolve_materialized_popularity_windows(self, now_ts: float) -> tuple[Dict[str, str], int]:
+    def _resolve_materialized_popularity_windows(
+        self, now_ts: float
+    ) -> tuple[Dict[str, str], int]:
         materialized_keys = {
-            window_name: materialized_window_key(window_name, spec["bucket_seconds"], now_ts)
+            window_name: materialized_window_key(
+                window_name, spec["bucket_seconds"], now_ts
+            )
             for window_name, spec in self._popularity_windows.items()
         }
 
@@ -77,7 +85,13 @@ class FeatureReader:
         with self._materialized_window_lock:
             if self._all_windows_cached(materialized_keys, now_ts):
                 snapshot_materialization_total.labels(outcome="local_cache_hit").inc()
-                return {window_name: cache_key for window_name, (cache_key, _) in self._materialized_window_cache.items()}, 0
+                return {
+                    window_name: cache_key
+                    for window_name, (
+                        cache_key,
+                        _,
+                    ) in self._materialized_window_cache.items()
+                }, 0
 
             for window_name, key in materialized_keys.items():
                 cached = self._materialized_window_cache.get(window_name)
@@ -110,7 +124,10 @@ class FeatureReader:
                 if cached and cached[0] == key and now_ts < cached[1]:
                     continue
                 if ttl and ttl > 0:
-                    self._materialized_window_cache[window_name] = (key, now_ts + float(ttl))
+                    self._materialized_window_cache[window_name] = (
+                        key,
+                        now_ts + float(ttl),
+                    )
                     snapshot_materialization_total.labels(outcome="redis_ttl_hit").inc()
                 else:
                     windows_to_rebuild.append(window_name)
@@ -147,15 +164,18 @@ class FeatureReader:
                             self._rebuild_events[key] = threading.Event()
                     else:
                         windows_locked_out.append(window_name)
-                        snapshot_materialization_total.labels(outcome="lock_skipped").inc()
+                        snapshot_materialization_total.labels(
+                            outcome="lock_skipped"
+                        ).inc()
                         logger.debug(
                             "zunionstore_skipped window=%s key=%s reason=lock_held_by_peer",
-                            window_name, key
+                            window_name,
+                            key,
                         )
                         # Check if there's already an Event to wait on
                         if key in self._rebuild_events:
                             wait_events[window_name] = self._rebuild_events[key]
-        
+
         # Phase 6: Perform ZUNIONSTORE rebuild (outside the lock)
         if windows_to_rebuild:
             if windows_won_lock:
@@ -172,28 +192,32 @@ class FeatureReader:
                     rebuild_pipe.zunionstore(key, bucket_keys, aggregate="SUM")
                     rebuild_pipe.expire(key, spec["materialized_ttl_seconds"])
                     rebuild_pipe.delete(lock_keys[window_name])  # Release lock
-                
+
                 try:
                     rebuild_pipe.execute()
                     round_trips += 1
-                    
+
                     # Update cache and signal waiting threads
                     with self._materialized_window_lock:
                         for window_name in windows_won_lock:
                             spec = self._popularity_windows[window_name]
                             key = materialized_keys[window_name]
                             self._materialized_window_cache[window_name] = (
-                                key, 
-                                now_ts + float(spec["materialized_ttl_seconds"])
+                                key,
+                                now_ts + float(spec["materialized_ttl_seconds"]),
                             )
-                            snapshot_materialization_total.labels(outcome="rebuilt").inc()
+                            snapshot_materialization_total.labels(
+                                outcome="rebuilt"
+                            ).inc()
                             # Signal waiting threads
                             if key in self._rebuild_events:
                                 self._rebuild_events[key].set()
                                 # Clean up old events to prevent memory leak
                                 del self._rebuild_events[key]
-                    
-                    snapshot_materialization_latency_seconds.observe(time.perf_counter() - t0)
+
+                    snapshot_materialization_latency_seconds.observe(
+                        time.perf_counter() - t0
+                    )
                 except Exception as e:
                     logger.warning("zunionstore_batch_failed error=%s", e)
                     # Release all locks on failure
@@ -205,7 +229,7 @@ class FeatureReader:
                         round_trips += 1
                     except Exception:
                         pass  # Locks will expire naturally
-                    
+
                     # Signal failure to waiting threads
                     with self._materialized_window_lock:
                         for window_name in windows_won_lock:
@@ -213,36 +237,51 @@ class FeatureReader:
                             if key in self._rebuild_events:
                                 self._rebuild_events[key].set()
                                 del self._rebuild_events[key]
-                        snapshot_materialization_total.labels(outcome="rebuild_failed").inc()
-            
+                        snapshot_materialization_total.labels(
+                            outcome="rebuild_failed"
+                        ).inc()
+
             # Phase 4: For windows locked out, wait on Event or poll Redis
             if windows_locked_out:
                 # Wait on Events (50ms timeout) instead of sleeping in lock
                 for window_name, event in wait_events.items():
-                    event.wait(timeout=0.05)  # 50ms max wait, non-blocking for other threads
-                
+                    event.wait(
+                        timeout=0.05
+                    )  # 50ms max wait, non-blocking for other threads
+
                 # Check if peer rebuild completed
                 recheck_pipe = self.redis.pipeline(transaction=False)
                 for window_name in windows_locked_out:
                     recheck_pipe.ttl(materialized_keys[window_name])
                 recheck_ttls = recheck_pipe.execute()
                 round_trips += 1
-                
+
                 # Update cache based on results
                 with self._materialized_window_lock:
                     for window_name, ttl in zip(windows_locked_out, recheck_ttls):
                         key = materialized_keys[window_name]
                         if ttl and ttl > 0:
                             # Peer rebuild succeeded - cache the result
-                            self._materialized_window_cache[window_name] = (key, now_ts + float(ttl))
-                            snapshot_materialization_total.labels(outcome="peer_rebuilt").inc()
+                            self._materialized_window_cache[window_name] = (
+                                key,
+                                now_ts + float(ttl),
+                            )
+                            snapshot_materialization_total.labels(
+                                outcome="peer_rebuilt"
+                            ).inc()
                         else:
                             # Peer rebuild not visible yet - use shorter local cache TTL for retry
-                            self._materialized_window_cache[window_name] = (key, now_ts + 5.0)
-                            snapshot_materialization_total.labels(outcome="rebuild_pending").inc()
+                            self._materialized_window_cache[window_name] = (
+                                key,
+                                now_ts + 5.0,
+                            )
+                            snapshot_materialization_total.labels(
+                                outcome="rebuild_pending"
+                            ).inc()
                             logger.warning(
                                 "materialized_window_unavailable window=%s key=%s fallback=short_ttl_retry",
-                                window_name, key
+                                window_name,
+                                key,
                             )
 
         # Return resolved keys (re-acquire lock briefly for final cache read)
@@ -284,7 +323,9 @@ class FeatureReader:
         recent_clicks: tuple[str, ...] = ()
         clicked_categories: Set[str] = set()
         candidate_item_categories: Dict[str, str] = {}
-        canonical_candidate_ids = [canonical_article_id(item_id) for item_id in candidate_item_ids]
+        canonical_candidate_ids = [
+            canonical_article_id(item_id) for item_id in candidate_item_ids
+        ]
         popularity_signals: Dict[str, Dict[str, float]] = {
             item_id: {"1h": 0.0, "24h": 0.0, "7d": 0.0}
             for item_id in canonical_candidate_ids
@@ -294,15 +335,22 @@ class FeatureReader:
         if user_id:
             try:
                 affinity_key = f"user:{user_id}:category_affinity"
-                affinity_ts_key = f"{affinity_key}{RedisConfig.CATEGORY_AFFINITY_TIMESTAMP_SUFFIX}"
+                affinity_ts_key = (
+                    f"{affinity_key}{RedisConfig.CATEGORY_AFFINITY_TIMESTAMP_SUFFIX}"
+                )
                 user_pipe = self.redis.pipeline(transaction=False)
-                user_pipe.lrange(f"user:{user_id}:recent_clicks", 0, max_recent_clicks - 1)
+                user_pipe.lrange(
+                    f"user:{user_id}:recent_clicks", 0, max_recent_clicks - 1
+                )
                 user_pipe.hgetall(affinity_key)
                 user_pipe.hgetall(affinity_ts_key)
                 raw_recent_clicks, affinity_raw, affinity_ts_raw = user_pipe.execute()
                 round_trips += 1
 
-                recent_clicks = tuple(canonical_article_id(item_id) for item_id in (raw_recent_clicks or []))
+                recent_clicks = tuple(
+                    canonical_article_id(item_id)
+                    for item_id in (raw_recent_clicks or [])
+                )
 
                 now = time.time()
                 for cat, score in affinity_raw.items():
@@ -313,7 +361,9 @@ class FeatureReader:
                     except (TypeError, ValueError):
                         updated_at = now
                     elapsed = max(0.0, now - updated_at)
-                    decayed_score = raw_score * math.exp(-RedisConfig.CATEGORY_AFFINITY_DECAY_LAMBDA * elapsed)
+                    decayed_score = raw_score * math.exp(
+                        -RedisConfig.CATEGORY_AFFINITY_DECAY_LAMBDA * elapsed
+                    )
                     if decayed_score > 1e-9:
                         category_affinity[cat] = decayed_score
             except redis.TimeoutError:
@@ -328,7 +378,9 @@ class FeatureReader:
         # rebuild only the windows that are actually absent.
         materialized_keys: Dict[str, str] = {}
         try:
-            materialized_keys, materialize_round_trips = self._resolve_materialized_popularity_windows(time.time())
+            materialized_keys, materialize_round_trips = (
+                self._resolve_materialized_popularity_windows(time.time())
+            )
             round_trips += materialize_round_trips
         except redis.TimeoutError:
             degraded_reasons.append(DegradationReason.REDIS_TIMEOUT)
@@ -352,7 +404,9 @@ class FeatureReader:
                     item_pipe.hget(item_meta_key(item_id), "category")
                 for window_name in ("1h", "24h", "7d"):
                     if materialized_keys:
-                        item_pipe.zmscore(materialized_keys[window_name], canonical_candidate_ids)
+                        item_pipe.zmscore(
+                            materialized_keys[window_name], canonical_candidate_ids
+                        )
                 response = item_pipe.execute()
                 round_trips += 1
 
@@ -369,9 +423,13 @@ class FeatureReader:
                 }
 
                 if materialized_keys:
-                    for window_name, scores in zip(("1h", "24h", "7d"), response[offset:]):
+                    for window_name, scores in zip(
+                        ("1h", "24h", "7d"), response[offset:]
+                    ):
                         for item_id, raw_score in zip(canonical_candidate_ids, scores):
-                            popularity_signals[item_id][window_name] = float(raw_score or 0.0)
+                            popularity_signals[item_id][window_name] = float(
+                                raw_score or 0.0
+                            )
             except redis.TimeoutError:
                 degraded_reasons.append(DegradationReason.REDIS_TIMEOUT)
             except redis.ConnectionError:
@@ -391,7 +449,12 @@ class FeatureReader:
             )
 
         status = "success"
-        if degraded and (recent_clicks or category_affinity or candidate_item_categories or any(popularity_signals.values())):
+        if degraded and (
+            recent_clicks
+            or category_affinity
+            or candidate_item_categories
+            or any(popularity_signals.values())
+        ):
             status = "partial"
         elif degraded:
             status = "degraded"

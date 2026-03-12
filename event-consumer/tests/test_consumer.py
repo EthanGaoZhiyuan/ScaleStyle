@@ -82,11 +82,15 @@ def consumer_ctx():
     span_context.__exit__.return_value = False
     tracer.start_as_current_span.return_value = span_context
 
-    with patch("consumer.observability.setup_tracing", return_value=tracer) as mock_setup_tracing, patch(
+    with patch(
+        "consumer.observability.setup_tracing", return_value=tracer
+    ) as mock_setup_tracing, patch(
         "consumer.MetricsServer"
     ) as mock_metrics_server_cls, patch(
         "consumer.redis.Redis"
-    ) as mock_redis_cls, patch("consumer.KafkaConsumer") as mock_kafka_cls, patch(
+    ) as mock_redis_cls, patch(
+        "consumer.KafkaConsumer"
+    ) as mock_kafka_cls, patch(
         "consumer.KafkaProducer"
     ) as mock_kafka_producer_cls:
         redis_client = Mock()
@@ -189,11 +193,13 @@ def test_malformed_event_not_materialized(consumer_ctx):
 def test_kafka_auth_kwargs_plaintext_omits_sasl_and_ssl_fields(consumer_ctx):
     consumer, _, _, _, _, _ = consumer_ctx
 
-    with patch("consumer.config.KAFKA_SECURITY_PROTOCOL", "PLAINTEXT"), \
-         patch("consumer.config.KAFKA_SASL_MECHANISM", "SCRAM-SHA-512"), \
-         patch("consumer.config.KAFKA_USERNAME", "user"), \
-         patch("consumer.config.KAFKA_PASSWORD", "pass"), \
-         patch("consumer.config.KAFKA_SSL_CAFILE", "/tmp/ca.pem"):
+    with patch("consumer.config.KAFKA_SECURITY_PROTOCOL", "PLAINTEXT"), patch(
+        "consumer.config.KAFKA_SASL_MECHANISM", "SCRAM-SHA-512"
+    ), patch("consumer.config.KAFKA_USERNAME", "user"), patch(
+        "consumer.config.KAFKA_PASSWORD", "pass"
+    ), patch(
+        "consumer.config.KAFKA_SSL_CAFILE", "/tmp/ca.pem"
+    ):
         auth_kwargs = consumer._kafka_auth_kwargs()
 
     assert auth_kwargs == {"security_protocol": "PLAINTEXT"}
@@ -318,8 +324,8 @@ def test_retry_published_commit_failure_propagates_through_run_loop(
 
     tp = TopicPartition(msg.topic, msg.partition)
     kafka_consumer.poll.side_effect = [
-        {tp: [msg]},   # first call: one message → triggers the failing path
-        {},            # never reached; run() terminates before second poll
+        {tp: [msg]},  # first call: one message → triggers the failing path
+        {},  # never reached; run() terminates before second poll
     ]
     kafka_consumer.assignment.return_value = set()
 
@@ -361,9 +367,11 @@ def test_run_batch_commit_stops_at_first_unsafe_offset(consumer_ctx, valid_event
     # msg1 safe, msg2 unsafe (e.g. retry send failed)
     def mock_process(m, **_):
         return (
-            (ProcessingResult.APPLIED, True, False) if m.offset == 10
+            (ProcessingResult.APPLIED, True, False)
+            if m.offset == 10
             else (ProcessingResult.TRANSIENT_FAILURE, False, False)
         )
+
     consumer._process_message_internal = mock_process
 
     consumer.run()
@@ -374,7 +382,9 @@ def test_run_batch_commit_stops_at_first_unsafe_offset(consumer_ctx, valid_event
     assert committed[tp0].offset == 11  # msg1.offset + 1, not msg2
 
 
-def test_run_batches_partition_commits_to_highest_safe_offset(consumer_ctx, valid_event):
+def test_run_batches_partition_commits_to_highest_safe_offset(
+    consumer_ctx, valid_event
+):
     """run() commits one offset map per poll batch."""
     consumer, kafka_consumer, _, _, _, _ = consumer_ctx
     from kafka import TopicPartition
@@ -418,10 +428,15 @@ def test_run_batches_partition_commits_to_highest_safe_offset(consumer_ctx, vali
     committed = kafka_consumer.commit.call_args.kwargs["offsets"]
     assert committed[tp0].offset == 12
     assert committed[tp1].offset == 8
-    assert kafka_consumer.poll.call_args_list[0].kwargs["max_records"] == config.KAFKA_POLL_MAX_RECORDS
+    assert (
+        kafka_consumer.poll.call_args_list[0].kwargs["max_records"]
+        == config.KAFKA_POLL_MAX_RECORDS
+    )
 
 
-def test_dlq_marker_persist_failure_commits_offset_with_at_least_once_semantics(consumer_ctx):
+def test_dlq_marker_persist_failure_commits_offset_with_at_least_once_semantics(
+    consumer_ctx,
+):
     """7) DLQ ack success but marker persist failure -> commit source offset."""
     consumer, kafka_consumer, kafka_producer, redis_client, _, _ = consumer_ctx
     redis_client.set.return_value = None
@@ -503,27 +518,28 @@ def test_primary_mode_subscribes_only_to_main_topic():
     """Primary mode should only subscribe to scalestyle.clicks"""
     import importlib
     import config
-    
+
     # Reload config to pick up env var
     importlib.reload(config)
-    
-    with patch("consumer.MetricsServer"), \
-         patch("consumer.redis.Redis") as mock_redis_cls, \
-         patch("consumer.KafkaConsumer") as mock_kafka_cls, \
-         patch("consumer.KafkaProducer"):
-        
+
+    with patch("consumer.MetricsServer"), patch(
+        "consumer.redis.Redis"
+    ) as mock_redis_cls, patch("consumer.KafkaConsumer") as mock_kafka_cls, patch(
+        "consumer.KafkaProducer"
+    ):
+
         redis_client = Mock()
         redis_client.ping.return_value = True
         redis_client.register_script.return_value = Mock()
         mock_redis_cls.return_value = redis_client
-        
+
         EventConsumer()
-        
+
         # Verify KafkaConsumer was called with ONLY the primary topic
         assert mock_kafka_cls.called
         call_args = mock_kafka_cls.call_args
         subscribed_topics = call_args[0]  # positional args
-        
+
         assert len(subscribed_topics) == 1
         assert subscribed_topics[0] == config.KAFKA_TOPIC
         assert config.KAFKA_RETRY_TOPIC not in subscribed_topics
@@ -534,27 +550,28 @@ def test_retry_mode_subscribes_only_to_retry_topic():
     """Retry mode should subscribe to all tiered retry topics"""
     import importlib
     import config
-    
+
     # Reload config to pick up env var
     importlib.reload(config)
-    
-    with patch("consumer.MetricsServer"), \
-         patch("consumer.redis.Redis") as mock_redis_cls, \
-         patch("consumer.KafkaConsumer") as mock_kafka_cls, \
-         patch("consumer.KafkaProducer"):
-        
+
+    with patch("consumer.MetricsServer"), patch(
+        "consumer.redis.Redis"
+    ) as mock_redis_cls, patch("consumer.KafkaConsumer") as mock_kafka_cls, patch(
+        "consumer.KafkaProducer"
+    ):
+
         redis_client = Mock()
         redis_client.ping.return_value = True
         redis_client.register_script.return_value = Mock()
         mock_redis_cls.return_value = redis_client
-        
+
         EventConsumer()
-        
+
         # Verify KafkaConsumer was called with ONLY the retry topic
         assert mock_kafka_cls.called
         call_args = mock_kafka_cls.call_args
         subscribed_topics = call_args[0]  # positional args
-        
+
         assert tuple(subscribed_topics) == tuple(config.KAFKA_RETRY_TOPICS)
         assert config.KAFKA_TOPIC not in subscribed_topics
 
@@ -563,14 +580,16 @@ def test_retry_mode_subscribes_only_to_retry_topic():
 def test_missing_consumer_mode_raises_error():
     """Missing CONSUMER_MODE should raise RuntimeError at config load time"""
     import importlib
-    
+
     # Remove CONSUMER_MODE if set
     import os
+
     if "CONSUMER_MODE" in os.environ:
         del os.environ["CONSUMER_MODE"]
-    
+
     with pytest.raises(RuntimeError, match="CONSUMER_MODE must be explicitly set"):
         import config
+
         importlib.reload(config)
 
 
@@ -579,22 +598,23 @@ def test_primary_mode_uses_isolated_consumer_group():
     """Primary mode should use event-consumer-primary group"""
     import importlib
     import config
-    
+
     # Reload config to pick up env var
     importlib.reload(config)
-    
-    with patch("consumer.MetricsServer"), \
-         patch("consumer.redis.Redis") as mock_redis_cls, \
-         patch("consumer.KafkaConsumer") as mock_kafka_cls, \
-         patch("consumer.KafkaProducer"):
-        
+
+    with patch("consumer.MetricsServer"), patch(
+        "consumer.redis.Redis"
+    ) as mock_redis_cls, patch("consumer.KafkaConsumer") as mock_kafka_cls, patch(
+        "consumer.KafkaProducer"
+    ):
+
         redis_client = Mock()
         redis_client.ping.return_value = True
         redis_client.register_script.return_value = Mock()
         mock_redis_cls.return_value = redis_client
-        
+
         EventConsumer()
-        
+
         # Verify consumer group ID has -primary suffix
         call_kwargs = mock_kafka_cls.call_args[1]
         assert call_kwargs["group_id"] == "event-consumer-primary"
@@ -605,33 +625,38 @@ def test_retry_mode_uses_isolated_consumer_group():
     """Retry mode should use event-consumer-retry group"""
     import importlib
     import config
-    
+
     # Reload config to pick up env var
     importlib.reload(config)
-    
-    with patch("consumer.MetricsServer"), \
-         patch("consumer.redis.Redis") as mock_redis_cls, \
-         patch("consumer.KafkaConsumer") as mock_kafka_cls, \
-         patch("consumer.KafkaProducer"):
-        
+
+    with patch("consumer.MetricsServer"), patch(
+        "consumer.redis.Redis"
+    ) as mock_redis_cls, patch("consumer.KafkaConsumer") as mock_kafka_cls, patch(
+        "consumer.KafkaProducer"
+    ):
+
         redis_client = Mock()
         redis_client.ping.return_value = True
         redis_client.register_script.return_value = Mock()
         mock_redis_cls.return_value = redis_client
-        
+
         EventConsumer()
-        
+
         # Verify consumer group ID has -retry suffix
         call_kwargs = mock_kafka_cls.call_args[1]
         assert call_kwargs["group_id"] == "event-consumer-retry"
 
 
 def test_internal_producer_publish_budget_is_bounded_to_future_get_timeout():
-    with patch("consumer.observability.setup_tracing", return_value=Mock()), \
-         patch("consumer.MetricsServer") as mock_metrics_server_cls, \
-         patch("consumer.redis.Redis") as mock_redis_cls, \
-         patch("consumer.KafkaConsumer") as mock_kafka_cls, \
-         patch("consumer.KafkaProducer") as mock_kafka_producer_cls:
+    with patch("consumer.observability.setup_tracing", return_value=Mock()), patch(
+        "consumer.MetricsServer"
+    ) as mock_metrics_server_cls, patch(
+        "consumer.redis.Redis"
+    ) as mock_redis_cls, patch(
+        "consumer.KafkaConsumer"
+    ) as mock_kafka_cls, patch(
+        "consumer.KafkaProducer"
+    ) as mock_kafka_producer_cls:
 
         redis_client = Mock()
         redis_client.ping.return_value = True
@@ -644,7 +669,10 @@ def test_internal_producer_publish_budget_is_bounded_to_future_get_timeout():
 
         producer_kwargs = mock_kafka_producer_cls.call_args.kwargs
         assert producer_kwargs["delivery_timeout_ms"] <= 5_000
-        assert producer_kwargs["request_timeout_ms"] < producer_kwargs["delivery_timeout_ms"]
+        assert (
+            producer_kwargs["request_timeout_ms"]
+            < producer_kwargs["delivery_timeout_ms"]
+        )
         assert producer_kwargs["request_timeout_ms"] == 3_500
         assert producer_kwargs["delivery_timeout_ms"] == 4_500
 
@@ -655,7 +683,9 @@ def test_internal_producer_publish_budget_is_bounded_to_future_get_timeout():
 
 
 @patch.dict("os.environ", {"RETRY_ENFORCE_DELAY": "true"}, clear=False)
-def test_retry_message_before_tier_delay_pauses_partition_without_processing(consumer_ctx, valid_event):
+def test_retry_message_before_tier_delay_pauses_partition_without_processing(
+    consumer_ctx, valid_event
+):
     """
     When RETRY_ENFORCE_DELAY=true: retry message before tier delay defers (pauses partition).
 
@@ -667,6 +697,7 @@ def test_retry_message_before_tier_delay_pauses_partition_without_processing(con
     """
     import importlib
     import config
+
     importlib.reload(config)
 
     consumer, kafka_consumer, kafka_producer, redis_client, lua_script, _ = consumer_ctx
@@ -701,7 +732,11 @@ def test_retry_message_before_tier_delay_pauses_partition_without_processing(con
     assert consumer.paused_partitions[tp] > time.time()
 
 
-@patch.dict("os.environ", {"CONSUMER_MODE": "retry", "RETRY_ENFORCE_DELAY": "false"}, clear=False)
+@patch.dict(
+    "os.environ",
+    {"CONSUMER_MODE": "retry", "RETRY_ENFORCE_DELAY": "false"},
+    clear=False,
+)
 def test_retry_mode_refuses_immediate_processing_without_explicit_unsafe_override():
     """Retry worker must fail fast if delay semantics are disabled implicitly."""
     import importlib
@@ -720,7 +755,9 @@ def test_retry_mode_refuses_immediate_processing_without_explicit_unsafe_overrid
     },
     clear=False,
 )
-def test_retry_message_processed_immediately_when_delay_disabled(consumer_ctx, valid_event):
+def test_retry_message_processed_immediately_when_delay_disabled(
+    consumer_ctx, valid_event
+):
     """
     When RETRY_ENFORCE_DELAY=false with explicit unsafe opt-in: retry messages process immediately.
 
@@ -758,7 +795,9 @@ def test_retry_message_processed_immediately_when_delay_disabled(consumer_ctx, v
 
 
 @patch.dict("os.environ", {"RETRY_ENFORCE_DELAY": "true"}, clear=False)
-def test_retry_run_loop_waits_until_tier_delay_elapses_before_processing(consumer_ctx, valid_event):
+def test_retry_run_loop_waits_until_tier_delay_elapses_before_processing(
+    consumer_ctx, valid_event
+):
     """Run loop must defer a retry message until its tier delay has actually elapsed."""
     import importlib
     import config
@@ -823,17 +862,17 @@ def test_retry_run_loop_waits_until_tier_delay_elapses_before_processing(consume
 def test_retry_message_after_tier_delay_processes_normally(consumer_ctx, valid_event):
     """
     Critical test 2: Retry-tier message after its fixed tier delay should process normally.
-    
+
     Assertions:
     - Redis update IS executed
     - Offset IS committed on success
     - Message is NOT re-routed to retry topic (retry cycle ends)
     """
     consumer, kafka_consumer, kafka_producer, redis_client, lua_script, _ = consumer_ctx
-    
+
     import config
     import time
-    
+
     # Create retry-1s message routed in the past so its fixed tier delay is already elapsed.
     past_ts = time.time() - 10.0
     retry_event = dict(valid_event)
@@ -843,40 +882,43 @@ def test_retry_message_after_tier_delay_processes_normally(consumer_ctx, valid_e
         "retry_topic": config.KAFKA_RETRY_TOPIC_1S,
         "delay_seconds": 1.0,
         "routed_at_ts": past_ts,
-        "reason": "transient_error"
+        "reason": "transient_error",
     }
-    
+
     msg = _message_of(retry_event)
     msg.topic = config.KAFKA_RETRY_TOPIC_1S
     msg.headers = [(config.KAFKA_RETRY_HEADER, b"1")]
-    
+
     # Lua script succeeds
     lua_script.return_value = "OK"
-    
+
     # Process message
     result = consumer.process_message(msg)
-    
+
     # Assert: Successfully applied
     assert result == ProcessingResult.APPLIED
-    
+
     # Assert: Redis WAS updated (Lua script called)
     lua_script.assert_called_once()
-    
+
     # Assert: Offset WAS committed
     kafka_consumer.commit.assert_called_once()
-    
+
     # Assert: NOT sent to retry topic again (success ends retry cycle)
     kafka_producer.send.assert_not_called()
 
 
 @patch.dict("os.environ", {"RETRY_ENFORCE_DELAY": "true"}, clear=False)
-def test_delayed_retry_60s_partition_does_not_starve_ready_retry_1s_partition(consumer_ctx, valid_event):
+def test_delayed_retry_60s_partition_does_not_starve_ready_retry_1s_partition(
+    consumer_ctx, valid_event
+):
     """
     When RETRY_ENFORCE_DELAY=true: a delayed retry-60s partition must not block
     a ready retry-1s partition in the same poll batch. Ready partition commits.
     """
     import importlib
     import config
+
     importlib.reload(config)
 
     consumer, kafka_consumer, kafka_producer, redis_client, lua_script, _ = consumer_ctx
@@ -1017,7 +1059,11 @@ def test_poison_message_reaches_dlq_after_bounded_retries(consumer_ctx, valid_ev
     }
     result4 = consumer.process_message(msg4)
     assert result4 == ProcessingResult.TRANSIENT_FAILURE
-    dlq_send = [c for c in kafka_producer.send.call_args_list if c.args[0] == config.KAFKA_DLQ_TOPIC]
+    dlq_send = [
+        c
+        for c in kafka_producer.send.call_args_list
+        if c.args[0] == config.KAFKA_DLQ_TOPIC
+    ]
     assert len(dlq_send) == 1
     assert "max_retries_exceeded" in dlq_send[0].kwargs["value"]["dlq_reason"]
 
@@ -1025,7 +1071,7 @@ def test_poison_message_reaches_dlq_after_bounded_retries(consumer_ctx, valid_ev
 def test_retry_count_increments_across_failures_until_dlq(consumer_ctx, valid_event):
     """
     Critical test 3: Retry count increments across failures and persists across topics.
-    
+
     Assertions:
     - 1st failure -> retry_count=1
     - 2nd failure -> retry_count=2
@@ -1033,17 +1079,17 @@ def test_retry_count_increments_across_failures_until_dlq(consumer_ctx, valid_ev
     - 4th failure -> exceeds MAX_RETRIES, routes to DLQ
     """
     consumer, kafka_consumer, kafka_producer, redis_client, lua_script, _ = consumer_ctx
-    
+
     import config
-    
+
     # === First failure: retry_count should be 1 ===
     msg1 = _message_of(valid_event)
     msg1.headers = []  # No retry header yet (original message)
     lua_script.side_effect = RuntimeError("transient failure 1")
-    
+
     result1 = consumer.process_message(msg1)
     assert result1 == ProcessingResult.TRANSIENT_FAILURE
-    
+
     # Assert: Sent to retry-1s tier with retry_count=1
     kafka_producer.send.assert_called_once()
     retry_call_1 = kafka_producer.send.call_args
@@ -1052,7 +1098,7 @@ def test_retry_count_increments_across_failures_until_dlq(consumer_ctx, valid_ev
     assert retry_call_1.kwargs["value"]["_retry_meta"]["retry_count"] == 1
     assert retry_call_1.kwargs["value"]["_retry_meta"]["retry_tier"] == "retry_1s"
     kafka_producer.send.reset_mock()
-    
+
     # === Second failure: retry_count should be 2 ===
     msg2 = _message_of(valid_event)
     msg2.topic = config.KAFKA_RETRY_TOPIC_1S
@@ -1063,13 +1109,13 @@ def test_retry_count_increments_across_failures_until_dlq(consumer_ctx, valid_ev
         "retry_topic": config.KAFKA_RETRY_TOPIC_1S,
         "delay_seconds": 1.0,
         "routed_at_ts": 0,
-        "reason": "transient failure 1"
+        "reason": "transient failure 1",
     }
     lua_script.side_effect = RuntimeError("transient failure 2")
-    
+
     result2 = consumer.process_message(msg2)
     assert result2 == ProcessingResult.TRANSIENT_FAILURE
-    
+
     # Assert: Sent to retry-10s tier with retry_count=2
     kafka_producer.send.assert_called_once()
     retry_call_2 = kafka_producer.send.call_args
@@ -1078,7 +1124,7 @@ def test_retry_count_increments_across_failures_until_dlq(consumer_ctx, valid_ev
     assert retry_call_2.kwargs["value"]["_retry_meta"]["retry_count"] == 2
     assert retry_call_2.kwargs["value"]["_retry_meta"]["retry_tier"] == "retry_10s"
     kafka_producer.send.reset_mock()
-    
+
     # === Third failure: retry_count should be 3 ===
     msg3 = _message_of(valid_event)
     msg3.topic = config.KAFKA_RETRY_TOPIC_10S
@@ -1089,13 +1135,13 @@ def test_retry_count_increments_across_failures_until_dlq(consumer_ctx, valid_ev
         "retry_topic": config.KAFKA_RETRY_TOPIC_10S,
         "delay_seconds": 10.0,
         "routed_at_ts": 0,
-        "reason": "transient failure 2"
+        "reason": "transient failure 2",
     }
     lua_script.side_effect = RuntimeError("transient failure 3")
-    
+
     result3 = consumer.process_message(msg3)
     assert result3 == ProcessingResult.TRANSIENT_FAILURE
-    
+
     # Assert: Sent to retry-60s tier with retry_count=3
     kafka_producer.send.assert_called_once()
     retry_call_3 = kafka_producer.send.call_args
@@ -1104,7 +1150,7 @@ def test_retry_count_increments_across_failures_until_dlq(consumer_ctx, valid_ev
     assert retry_call_3.kwargs["value"]["_retry_meta"]["retry_count"] == 3
     assert retry_call_3.kwargs["value"]["_retry_meta"]["retry_tier"] == "retry_60s"
     kafka_producer.send.reset_mock()
-    
+
     # === Fourth failure: retry_count=4 exceeds MAX_RETRIES (3), should go to DLQ ===
     msg4 = _message_of(valid_event)
     msg4.topic = config.KAFKA_RETRY_TOPIC_60S
@@ -1115,17 +1161,17 @@ def test_retry_count_increments_across_failures_until_dlq(consumer_ctx, valid_ev
         "retry_topic": config.KAFKA_RETRY_TOPIC_60S,
         "delay_seconds": 60.0,
         "routed_at_ts": 0,
-        "reason": "transient failure 3"
+        "reason": "transient failure 3",
     }
     lua_script.side_effect = RuntimeError("transient failure 4 - exceeds max retries")
-    
+
     # Mock DLQ operations
     redis_client.exists.return_value = 0  # Not already in DLQ
     redis_client.set.return_value = True  # Marker persisted successfully
-    
+
     result4 = consumer.process_message(msg4)
     assert result4 == ProcessingResult.TRANSIENT_FAILURE
-    
+
     # Assert: Sent to DLQ (not retry topic)
     kafka_producer.send.assert_called_once()
     dlq_call = kafka_producer.send.call_args
@@ -1138,37 +1184,37 @@ def test_retry_count_increments_across_failures_until_dlq(consumer_ctx, valid_ev
 def test_dlq_duplicate_prevents_redundant_send_and_commits_safely(consumer_ctx):
     """
     Critical test 4: DLQ duplicate detection prevents redundant sends.
-    
+
     Assertions:
     - When dlq_id already exists, DLQ send is skipped
     - Redis dedupe marker is not re-persisted
     - Original offset IS committed safely (idempotent operation)
     """
     consumer, kafka_consumer, kafka_producer, redis_client, lua_script, _ = consumer_ctx
-    
+
     malformed_event = {
         "user_id": "user-1",
         "item_id": "item-1",
         # missing event_id - permanent failure
     }
-    
+
     msg = _message_of(malformed_event)
-    
+
     # Mock: DLQ already dispatched (Redis returns True for duplicate check)
     redis_client.exists.return_value = 1  # dlq:sent:{dlq_id} already exists
-    
+
     # Process message
     result = consumer.process_message(msg)
-    
+
     # Assert: Permanent failure detected
     assert result == ProcessingResult.PERMANENT_FAILURE
-    
+
     # Assert: DLQ send was SKIPPED (duplicate detected before send)
     kafka_producer.send.assert_not_called()
-    
+
     # Assert: Redis dedupe marker NOT re-persisted (already exists)
     redis_client.set.assert_not_called()
-    
+
     # Assert: Offset WAS committed safely (idempotent operation)
     kafka_consumer.commit.assert_called_once()
 
@@ -1190,7 +1236,10 @@ def test_trace_headers_are_forwarded_to_retry_and_dlq(consumer_ctx, valid_event)
     result_retry = consumer.process_message(retry_msg)
     assert result_retry == ProcessingResult.TRANSIENT_FAILURE
     retry_headers = kafka_producer.send.call_args.kwargs["headers"]
-    assert (config.KAFKA_TRACEPARENT_HEADER, traceparent.encode("utf-8")) in retry_headers
+    assert (
+        config.KAFKA_TRACEPARENT_HEADER,
+        traceparent.encode("utf-8"),
+    ) in retry_headers
     assert (config.KAFKA_TRACESTATE_HEADER, tracestate.encode("utf-8")) in retry_headers
     kafka_producer.send.reset_mock()
     lua_script.side_effect = None
@@ -1234,7 +1283,9 @@ def test_process_message_extracts_parent_context_before_starting_span(
     tracer.start_as_current_span.return_value = span_context
     consumer.tracer = tracer
 
-    with patch("consumer.observability.extract_context", return_value=parent_context) as extract_context:
+    with patch(
+        "consumer.observability.extract_context", return_value=parent_context
+    ) as extract_context:
         result = consumer.process_message(msg)
 
     assert result == ProcessingResult.APPLIED
@@ -1248,7 +1299,9 @@ def test_process_message_extracts_parent_context_before_starting_span(
     call = tracer.start_as_current_span.call_args
     assert call.args[0] == "event-consumer.process"
     assert call.kwargs["context"] is parent_context
-    assert call.kwargs["attributes"]["messaging.destination.name"] == "scalestyle.clicks"
+    assert (
+        call.kwargs["attributes"]["messaging.destination.name"] == "scalestyle.clicks"
+    )
     assert call.kwargs["attributes"]["messaging.kafka.partition"] == 0
     assert call.kwargs["attributes"]["messaging.kafka.offset"] == 42
     import consumer as consumer_module
@@ -1260,7 +1313,9 @@ def test_process_message_extracts_parent_context_before_starting_span(
     span.set_attribute.assert_called_once_with("messaging.event.result", "applied")
 
 
-def test_process_message_without_trace_headers_uses_empty_carrier(consumer_ctx, valid_event):
+def test_process_message_without_trace_headers_uses_empty_carrier(
+    consumer_ctx, valid_event
+):
     consumer, _, _, _, lua_script, _ = consumer_ctx
     lua_script.return_value = "OK"
 
@@ -1272,14 +1327,18 @@ def test_process_message_without_trace_headers_uses_empty_carrier(consumer_ctx, 
     tracer.start_as_current_span.return_value = span_context
     consumer.tracer = tracer
 
-    with patch("consumer.observability.extract_context", return_value=None) as extract_context:
+    with patch(
+        "consumer.observability.extract_context", return_value=None
+    ) as extract_context:
         result = consumer.process_message(msg)
 
     assert result == ProcessingResult.APPLIED
     extract_context.assert_called_once_with({})
 
 
-def test_redis_connection_error_during_update_routes_to_retry(consumer_ctx, valid_event):
+def test_redis_connection_error_during_update_routes_to_retry(
+    consumer_ctx, valid_event
+):
     """
     Regression: Redis ConnectionError during Lua upsert -> TRANSIENT_FAILURE, routes to retry.
 
@@ -1329,7 +1388,9 @@ def test_dlq_payload_contains_canonical_schema_fields(consumer_ctx):
     assert "dlq_reason" in payload
 
 
-def test_retry_reroute_log_uses_canonical_snake_case_fields(consumer_ctx, valid_event, caplog):
+def test_retry_reroute_log_uses_canonical_snake_case_fields(
+    consumer_ctx, valid_event, caplog
+):
     consumer, kafka_consumer, kafka_producer, _, lua_script, _ = consumer_ctx
     import logging
 

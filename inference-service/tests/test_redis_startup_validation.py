@@ -34,7 +34,9 @@ def test_validate_startup_connection_logs_error_and_raises(monkeypatch, caplog):
     client = Mock()
     client.ping.side_effect = RuntimeError("redis unavailable")
 
-    monkeypatch.setattr(redis_client_module.RedisClient, "get_client", Mock(return_value=client))
+    monkeypatch.setattr(
+        redis_client_module.RedisClient, "get_client", Mock(return_value=client)
+    )
 
     with caplog.at_level("ERROR"):
         with pytest.raises(RuntimeError, match="redis unavailable"):
@@ -75,9 +77,16 @@ def test_server_boot_validates_redis_before_starting_ray(monkeypatch):
         "src.utils.redis_client.validate_startup_connection",
         lambda: validate_calls.append("validated"),
     )
-    monkeypatch.setattr("ray.init", lambda *args, **kwargs: ray_init_calls.append((args, kwargs)))
-    monkeypatch.setattr("ray.serve.start", lambda *args, **kwargs: serve_start_calls.append((args, kwargs)))
-    monkeypatch.setattr("ray.serve.run", lambda *args, **kwargs: serve_run_calls.append((args, kwargs)))
+    monkeypatch.setattr(
+        "ray.init", lambda *args, **kwargs: ray_init_calls.append((args, kwargs))
+    )
+    monkeypatch.setattr(
+        "ray.serve.start",
+        lambda *args, **kwargs: serve_start_calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "ray.serve.run", lambda *args, **kwargs: serve_run_calls.append((args, kwargs))
+    )
 
     sys.modules.pop("src.server", None)
     try:

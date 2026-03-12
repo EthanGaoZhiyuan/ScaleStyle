@@ -25,8 +25,8 @@ rate(personalization_feature_read_total{status!="success"}[5m])
 rate(personalization_feature_read_total{feature="recent_clicks",status!="success"}[5m])
 / rate(personalization_feature_read_total{feature="recent_clicks"}[5m])
 """
-from src.utils.metrics import counter, gauge, histogram
 
+from src.utils.metrics import counter, gauge, histogram
 
 feature_read_total = counter(
     "personalization_feature_read_total",
@@ -94,6 +94,7 @@ personalization_fallback_active = gauge(
 personalization_request_mode_total = counter(
     "personalization_request_mode_total",
     "Requests by personalization mode",
-    ["mode"],  # normal | disabled | degraded_init_fallback | degraded_runtime_boost_failure
+    [
+        "mode"
+    ],  # normal | disabled | degraded_init_fallback | degraded_runtime_boost_failure
 )
-

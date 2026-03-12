@@ -5,7 +5,9 @@ from unittest.mock import Mock, patch
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "inference-service" / "src"))
+sys.path.insert(
+    0, str(Path(__file__).parent.parent.parent / "inference-service" / "src")
+)
 
 from personalization.feature_reader_legacy import LegacyFeatureReader
 

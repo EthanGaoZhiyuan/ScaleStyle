@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -18,7 +17,10 @@ def test_elasticache_production_defaults_defer_stateful_changes_to_window():
     variables_tf = (REPO_ROOT / "infrastructure/terraform/variables.tf").read_text()
 
     assert "apply_immediately = var.redis_apply_immediately" in elasticache_tf
-    assert "preferred_maintenance_window = var.redis_preferred_maintenance_window" in elasticache_tf
+    assert (
+        "preferred_maintenance_window = var.redis_preferred_maintenance_window"
+        in elasticache_tf
+    )
     assert "snapshot_window            = var.redis_snapshot_window" in elasticache_tf
     assert 'variable "redis_apply_immediately"' in variables_tf
     assert "default = false" in variables_tf

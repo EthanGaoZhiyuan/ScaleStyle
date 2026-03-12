@@ -38,9 +38,7 @@ async def test_empty_candidates_fallback_popularity(monkeypatch):
 
             return P()
 
-    monkeypatch.setattr(
-        "src.deployments.ingress._redis_client", lambda: DummyRedis()
-    )
+    monkeypatch.setattr("src.deployments.ingress._redis_client", lambda: DummyRedis())
 
     from src.deployments.ingress import IngressDeployment, SearchRequest
 
@@ -103,9 +101,7 @@ async def test_redis_timeout_graceful_degradation(monkeypatch):
         def pipeline(self):
             raise TimeoutError("Redis connection timeout")
 
-    monkeypatch.setattr(
-        "src.deployments.ingress._redis_client", lambda: BadRedis()
-    )
+    monkeypatch.setattr("src.deployments.ingress._redis_client", lambda: BadRedis())
 
     from src.deployments.ingress import IngressDeployment, SearchRequest
 
@@ -177,9 +173,7 @@ async def test_ab_flow_base_no_rerank(monkeypatch):
 
             return P()
 
-    monkeypatch.setattr(
-        "src.deployments.ingress._redis_client", lambda: DummyRedis()
-    )
+    monkeypatch.setattr("src.deployments.ingress._redis_client", lambda: DummyRedis())
 
     from src.deployments.ingress import IngressDeployment, SearchRequest
 
@@ -249,9 +243,7 @@ async def test_ab_flow_smart_calls_rerank(monkeypatch):
 
             return P()
 
-    monkeypatch.setattr(
-        "src.deployments.ingress._redis_client", lambda: DummyRedis()
-    )
+    monkeypatch.setattr("src.deployments.ingress._redis_client", lambda: DummyRedis())
 
     from src.deployments.ingress import IngressDeployment, SearchRequest
 

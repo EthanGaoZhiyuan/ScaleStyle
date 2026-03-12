@@ -45,7 +45,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def decay_score(previous_score: float, previous_timestamp: Optional[float], current_timestamp: float, decay_lambda: float) -> float:
+def decay_score(
+    previous_score: float,
+    previous_timestamp: Optional[float],
+    current_timestamp: float,
+    decay_lambda: float,
+) -> float:
     """Apply exponential decay to a score last materialized at *previous_timestamp*."""
     if previous_score <= 0.0:
         return 0.0
@@ -63,10 +68,15 @@ def apply_decay_update(
     increment: float = 1.0,
 ) -> float:
     """Decay the previous score to *current_timestamp* and add the new event weight."""
-    return decay_score(previous_score, previous_timestamp, current_timestamp, decay_lambda) + increment
+    return (
+        decay_score(previous_score, previous_timestamp, current_timestamp, decay_lambda)
+        + increment
+    )
 
 
-def popularity_rank_score(actual_score: float, last_update_timestamp: float, decay_lambda: float) -> float:
+def popularity_rank_score(
+    actual_score: float, last_update_timestamp: float, decay_lambda: float
+) -> float:
     """Return the Redis ZSET ranking surrogate for decayed popularity."""
     if actual_score <= 0.0:
         raise ValueError("actual_score must be positive for popularity ranking")
@@ -75,6 +85,7 @@ def popularity_rank_score(actual_score: float, last_update_timestamp: float, dec
 
 class ProcessingResult(Enum):
     """Processing result for each message"""
+
     APPLIED = "applied"
     DUPLICATE = "duplicate"
     TRANSIENT_FAILURE = "transient_failure"  # Temporary failure (will retry)
@@ -167,19 +178,19 @@ class _CategoryCache:
 
 class EventConsumer:
     """Real-time event consumer that processes click events and updates Redis features.
-    
+
     Redis Cluster Compatibility:
         The Lua script below is INCOMPATIBLE with Redis Cluster mode (including
         ElastiCache Cluster Mode Enabled). It performs atomic writes across multiple
         key prefixes (user:*, item:*, global:*, popularity:*, session:*) that hash
         to different cluster slots. Redis Cluster requires all keys in a Lua script
         to be declared in KEYS[] and hash to the same slot.
-        
+
         CROSSSLOT error on every event would occur if cluster mode is enabled.
-        
+
         Production requirement: Use Redis standalone or replication group mode.
         ElastiCache: Set cluster_mode_enabled = false (replication group with replicas).
-        
+
         A startup check in _connect_redis() validates this and fails fast if cluster
         mode is detected.
     """
@@ -396,7 +407,9 @@ class EventConsumer:
         self.lua_upsert_script = self.redis_client.register_script(
             self.LUA_UPSERT_FEATURES
         )
-        logger.info("[SUCCESS] Loaded atomic duplicate-suppression + decayed-feature Lua script")
+        logger.info(
+            "[SUCCESS] Loaded atomic duplicate-suppression + decayed-feature Lua script"
+        )
 
         self.metrics_server.set_liveness_check(self._liveness_check)
         self.metrics_server.set_health_check(self._health_check)
@@ -410,7 +423,9 @@ class EventConsumer:
         """
         if isinstance(raw_timestamp, (int, float)):
             ts_seconds = float(raw_timestamp)
-            return ts_seconds, datetime.fromtimestamp(ts_seconds, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+            return ts_seconds, datetime.fromtimestamp(
+                ts_seconds, tz=timezone.utc
+            ).isoformat().replace("+00:00", "Z")
 
         if not isinstance(raw_timestamp, str) or not raw_timestamp.strip():
             raise ValueError("timestamp is required for decayed feature updates")
@@ -427,7 +442,7 @@ class EventConsumer:
 
     def _connect_redis(self):
         """Connect to Redis with production-grade connection pooling and resource limits.
-        
+
         Hardness contracts:
         - Max connections: Hard cap to prevent unbounded resource usage
         - Socket timeouts: Defense-in-depth at TCP and command level
@@ -450,14 +465,14 @@ class EventConsumer:
                 ssl=config.REDIS_TLS,
                 ssl_cert_reqs="required" if config.REDIS_TLS else None,
             )
-            
+
             self.redis_client = redis.Redis(connection_pool=pool)
-            
+
             # Verify connectivity with timeout
             ping_start = time.time()
             self.redis_client.ping()
             ping_latency = time.time() - ping_start
-            
+
             logger.info(
                 f"[SUCCESS] Connected to Redis: {config.REDIS_HOST}:{config.REDIS_PORT} "
                 f"(pool_size={config.REDIS_MAX_CONNECTIONS}, "
@@ -466,8 +481,10 @@ class EventConsumer:
                 f"ping_latency={ping_latency*1000:.1f}ms)"
             )
             metrics.record_redis_success()
-            metrics.redis_operations_total.labels(operation="ping", status="success").inc()
-            
+            metrics.redis_operations_total.labels(
+                operation="ping", status="success"
+            ).inc()
+
             # ── Fail-fast: Verify Redis is NOT in cluster mode ────────────────────
             # The Lua upsert script writes to multiple key prefixes (user:*, item:*,
             # global:*, popularity:*) that hash to different cluster slots. Redis
@@ -493,16 +510,19 @@ class EventConsumer:
                     metrics.redis_available.set(0)
                     metrics.consumer_health.set(0)
                     sys.exit(1)
-                logger.info("[SUCCESS] Redis cluster mode check passed (cluster_enabled=0)")
+                logger.info(
+                    "[SUCCESS] Redis cluster mode check passed (cluster_enabled=0)"
+                )
             except redis.ResponseError as e:
                 # INFO CLUSTER command may not be available in all Redis versions/configs
                 # If the command fails, assume standalone mode and log a warning
                 logger.warning(
                     "Could not verify Redis cluster mode (INFO CLUSTER failed: %s). "
                     "Assuming standalone mode. If you encounter CROSSSLOT errors, "
-                    "verify Redis is not in cluster mode.", e
+                    "verify Redis is not in cluster mode.",
+                    e,
                 )
-            
+
         except redis.ConnectionError as e:
             logger.error(
                 f"[ERROR] Redis connection failed: {e.__class__.__name__}: {e} "
@@ -510,7 +530,9 @@ class EventConsumer:
             )
             metrics.redis_available.set(0)
             metrics.consumer_health.set(0)
-            metrics.redis_operations_total.labels(operation="ping", status="error").inc()
+            metrics.redis_operations_total.labels(
+                operation="ping", status="error"
+            ).inc()
             sys.exit(1)
         except redis.TimeoutError as e:
             logger.error(
@@ -519,7 +541,9 @@ class EventConsumer:
             )
             metrics.redis_available.set(0)
             metrics.consumer_health.set(0)
-            metrics.redis_operations_total.labels(operation="ping", status="timeout").inc()
+            metrics.redis_operations_total.labels(
+                operation="ping", status="timeout"
+            ).inc()
             sys.exit(1)
         except Exception as e:
             logger.error(
@@ -527,7 +551,9 @@ class EventConsumer:
             )
             metrics.redis_available.set(0)
             metrics.consumer_health.set(0)
-            metrics.redis_operations_total.labels(operation="ping", status="error").inc()
+            metrics.redis_operations_total.labels(
+                operation="ping", status="error"
+            ).inc()
             sys.exit(1)
 
     def _connect_kafka(self):
@@ -536,10 +562,10 @@ class EventConsumer:
             # Determine which topics to subscribe to based on CONSUMER_MODE
             # Mode validation already done in config.py
             topics_to_subscribe = []
-            
+
             if config.CONSUMER_MODE == "primary":
                 topics_to_subscribe = [config.KAFKA_TOPIC]
-                logger.info(f"🔵 Running in PRIMARY mode - consuming only main traffic")
+                logger.info("🔵 Running in PRIMARY mode - consuming only main traffic")
             elif config.CONSUMER_MODE == "retry":
                 topics_to_subscribe = list(config.KAFKA_RETRY_TOPICS)
                 logger.info(
@@ -553,7 +579,7 @@ class EventConsumer:
                     f"Must be 'primary' or 'retry'."
                 )
                 sys.exit(1)
-            
+
             self.consumer = KafkaConsumer(
                 *topics_to_subscribe,
                 bootstrap_servers=config.KAFKA_BOOTSTRAP_SERVERS.split(","),
@@ -569,7 +595,9 @@ class EventConsumer:
                 max_poll_interval_ms=300_000,
                 **self._kafka_auth_kwargs(),
             )
-            logger.info(f"[SUCCESS] Connected to Kafka: {config.KAFKA_BOOTSTRAP_SERVERS}")
+            logger.info(
+                f"[SUCCESS] Connected to Kafka: {config.KAFKA_BOOTSTRAP_SERVERS}"
+            )
             logger.info(f"[INFO] Subscribed to topics: {topics_to_subscribe}")
             logger.info(f"[INFO] Consumer group: {config.KAFKA_GROUP_ID}")
         except Exception as e:
@@ -590,7 +618,7 @@ class EventConsumer:
                 value_serializer=lambda v: json.dumps(v).encode("utf-8"),
                 key_serializer=lambda k: k.encode("utf-8") if k else None,
                 acks="all",
-                retries=3,                                  # bounded, matching gateway semantics
+                retries=3,  # bounded, matching gateway semantics
                 enable_idempotence=True,
                 max_in_flight_requests_per_connection=5,
                 request_timeout_ms=3_500,
@@ -613,7 +641,9 @@ class EventConsumer:
     def _kafka_auth_kwargs(self):
         """Build Kafka auth config from environment-driven settings."""
         auth_kwargs = {}
-        normalized_security_protocol = (config.KAFKA_SECURITY_PROTOCOL or "").strip().upper()
+        normalized_security_protocol = (
+            (config.KAFKA_SECURITY_PROTOCOL or "").strip().upper()
+        )
         sasl_enabled = normalized_security_protocol.startswith("SASL_")
         ssl_enabled = "SSL" in normalized_security_protocol
 
@@ -632,12 +662,12 @@ class EventConsumer:
     def _classify_error(self, exc: Exception) -> ProcessingResult:
         """
         Classify exception as transient (retryable) or permanent (send to DLQ).
-        
+
         Permanent failures:
         - Invalid schema (ValueError, KeyError, TypeError, JSONDecodeError)
         - Missing required fields
         - Invalid data format
-        
+
         Transient failures:
         - Redis connection errors
         - Network timeouts
@@ -645,15 +675,17 @@ class EventConsumer:
         """
         if isinstance(exc, (ValueError, KeyError, TypeError, json.JSONDecodeError)):
             return ProcessingResult.PERMANENT_FAILURE
-        
+
         # Redis connection errors are typically transient
         if isinstance(exc, (redis.ConnectionError, redis.TimeoutError)):
             return ProcessingResult.TRANSIENT_FAILURE
-        
+
         # Default to transient for unknown errors (safer)
         return ProcessingResult.TRANSIENT_FAILURE
 
-    def _extract_retry_count(self, message, event: Optional[Dict[str, Any]] = None) -> int:
+    def _extract_retry_count(
+        self, message, event: Optional[Dict[str, Any]] = None
+    ) -> int:
         """Read retry count from Kafka headers, then fallback to payload retry metadata."""
         try:
             if not message.headers:
@@ -671,7 +703,11 @@ class EventConsumer:
             )
 
         payload = event if isinstance(event, dict) else {}
-        retry_meta = payload.get("_retry_meta") if isinstance(payload.get("_retry_meta"), dict) else {}
+        retry_meta = (
+            payload.get("_retry_meta")
+            if isinstance(payload.get("_retry_meta"), dict)
+            else {}
+        )
         try:
             retry_from_payload = retry_meta.get("retry_count")
             return int(retry_from_payload) if retry_from_payload is not None else 0
@@ -692,7 +728,9 @@ class EventConsumer:
 
     def _extract_trace_context(self, message) -> Dict[str, Optional[str]]:
         """Read W3C trace context headers from Kafka message."""
-        traceparent = self._extract_header_value(message, config.KAFKA_TRACEPARENT_HEADER)
+        traceparent = self._extract_header_value(
+            message, config.KAFKA_TRACEPARENT_HEADER
+        )
         tracestate = self._extract_header_value(message, config.KAFKA_TRACESTATE_HEADER)
 
         trace_id = None
@@ -722,9 +760,19 @@ class EventConsumer:
         headers = []
         trace_ctx = self._extract_trace_context(message)
         if trace_ctx["traceparent"]:
-            headers.append((config.KAFKA_TRACEPARENT_HEADER, trace_ctx["traceparent"].encode("utf-8")))
+            headers.append(
+                (
+                    config.KAFKA_TRACEPARENT_HEADER,
+                    trace_ctx["traceparent"].encode("utf-8"),
+                )
+            )
         if trace_ctx["tracestate"]:
-            headers.append((config.KAFKA_TRACESTATE_HEADER, trace_ctx["tracestate"].encode("utf-8")))
+            headers.append(
+                (
+                    config.KAFKA_TRACESTATE_HEADER,
+                    trace_ctx["tracestate"].encode("utf-8"),
+                )
+            )
         return headers
 
     def _log_terminal_commit_uncertainty(
@@ -761,7 +809,9 @@ class EventConsumer:
             raise ValueError(f"retry_count {retry_count} out of configured tier range")
         return config.KAFKA_RETRY_TIERS[retry_count - 1]
 
-    def _respect_retry_tier_delay(self, message, event: Dict[str, Any], retry_count: int) -> bool:
+    def _respect_retry_tier_delay(
+        self, message, event: Dict[str, Any], retry_count: int
+    ) -> bool:
         """
         Honor the fixed delay associated with a retry topic tier.
 
@@ -780,7 +830,11 @@ class EventConsumer:
             return False
 
         delay_seconds = self.retry_topic_to_delay_seconds[message.topic]
-        retry_meta = event.get("_retry_meta") if isinstance(event.get("_retry_meta"), dict) else {}
+        retry_meta = (
+            event.get("_retry_meta")
+            if isinstance(event.get("_retry_meta"), dict)
+            else {}
+        )
         routed_at_ts = retry_meta.get("routed_at_ts")
         if not isinstance(routed_at_ts, (int, float)):
             return False
@@ -850,7 +904,9 @@ class EventConsumer:
         try:
             exists = bool(self.redis_client.exists(f"dlq:sent:{dlq_id}"))
             metrics.record_redis_success()
-            metrics.redis_operations_total.labels(operation="dlq_check", status="success").inc()
+            metrics.redis_operations_total.labels(
+                operation="dlq_check", status="success"
+            ).inc()
             return exists
         except redis.TimeoutError as e:
             metrics.record_redis_error()
@@ -860,7 +916,9 @@ class EventConsumer:
                 config.REDIS_SOCKET_TIMEOUT_SEC,
                 e,
             )
-            metrics.redis_operations_total.labels(operation="dlq_check", status="timeout").inc()
+            metrics.redis_operations_total.labels(
+                operation="dlq_check", status="timeout"
+            ).inc()
             return False  # Fail-open: assume not sent to allow retry
         except redis.ConnectionError as e:
             metrics.record_redis_error()
@@ -869,7 +927,9 @@ class EventConsumer:
                 dlq_id,
                 e,
             )
-            metrics.redis_operations_total.labels(operation="dlq_check", status="connection_error").inc()
+            metrics.redis_operations_total.labels(
+                operation="dlq_check", status="connection_error"
+            ).inc()
             return False
         except Exception as e:
             metrics.record_redis_error()
@@ -879,7 +939,9 @@ class EventConsumer:
                 e.__class__.__name__,
                 e,
             )
-            metrics.redis_operations_total.labels(operation="dlq_check", status="error").inc()
+            metrics.redis_operations_total.labels(
+                operation="dlq_check", status="error"
+            ).inc()
             return False
 
     def _mark_dlq_dispatched(self, dlq_id: str) -> bool:
@@ -901,10 +963,14 @@ class EventConsumer:
             )
             metrics.record_redis_success()
             if marked:
-                metrics.redis_operations_total.labels(operation="dlq_mark", status="success").inc()
+                metrics.redis_operations_total.labels(
+                    operation="dlq_mark", status="success"
+                ).inc()
             else:
                 # NX failed: key already exists (race condition or duplicate)
-                metrics.redis_operations_total.labels(operation="dlq_mark", status="already_exists").inc()
+                metrics.redis_operations_total.labels(
+                    operation="dlq_mark", status="already_exists"
+                ).inc()
                 logger.debug("DLQ mark skipped (already exists): dlq_id=%s", dlq_id)
             return bool(marked)
         except redis.TimeoutError as e:
@@ -915,7 +981,9 @@ class EventConsumer:
                 config.REDIS_SOCKET_TIMEOUT_SEC,
                 e,
             )
-            metrics.redis_operations_total.labels(operation="dlq_mark", status="timeout").inc()
+            metrics.redis_operations_total.labels(
+                operation="dlq_mark", status="timeout"
+            ).inc()
             return False
         except redis.ConnectionError as e:
             metrics.record_redis_error()
@@ -924,7 +992,9 @@ class EventConsumer:
                 dlq_id,
                 e,
             )
-            metrics.redis_operations_total.labels(operation="dlq_mark", status="connection_error").inc()
+            metrics.redis_operations_total.labels(
+                operation="dlq_mark", status="connection_error"
+            ).inc()
             return False
         except Exception as e:
             metrics.record_redis_error()
@@ -934,7 +1004,9 @@ class EventConsumer:
                 e.__class__.__name__,
                 e,
             )
-            metrics.redis_operations_total.labels(operation="dlq_mark", status="error").inc()
+            metrics.redis_operations_total.labels(
+                operation="dlq_mark", status="error"
+            ).inc()
             return False
 
     def _send_to_retry_topic(self, message, retry_count: int, reason: str) -> None:
@@ -944,8 +1016,14 @@ class EventConsumer:
         Blocks until broker ack is received to avoid committing source offset
         before retry message is durably written.
         """
-        retry_tier_name, retry_topic, delay_seconds = self._retry_tier_for_count(retry_count)
-        base_event = message.value if isinstance(message.value, dict) else {"payload": message.value}
+        retry_tier_name, retry_topic, delay_seconds = self._retry_tier_for_count(
+            retry_count
+        )
+        base_event = (
+            message.value
+            if isinstance(message.value, dict)
+            else {"payload": message.value}
+        )
         event = dict(base_event)
         event["_retry_meta"] = {
             "retry_count": retry_count,
@@ -955,7 +1033,11 @@ class EventConsumer:
             "routed_at_ts": time.time(),
             "reason": reason,
         }
-        retry_key = event.get("event_id") or message.key or f"{message.topic}:{message.partition}:{message.offset}"
+        retry_key = (
+            event.get("event_id")
+            or message.key
+            or f"{message.topic}:{message.partition}:{message.offset}"
+        )
         headers = self._forward_trace_headers(message)
         headers.append((config.KAFKA_RETRY_HEADER, str(retry_count).encode("utf-8")))
         future = self.kafka_producer.send(
@@ -966,7 +1048,9 @@ class EventConsumer:
         )
         metadata = future.get(timeout=5)
         self.retry_routed_count += 1
-        metrics.kafka_produce_total.labels(topic=retry_tier_name, status="success").inc()
+        metrics.kafka_produce_total.labels(
+            topic=retry_tier_name, status="success"
+        ).inc()
         metrics.events_retry_routed_total.labels(retry_count=str(retry_count)).inc()
         metrics.events_retry_tier_routed_total.labels(
             retry_count=str(retry_count),
@@ -1008,7 +1092,11 @@ class EventConsumer:
                 message.topic,
                 message.partition,
                 message.offset,
-                (message.value or {}).get("event_id") if isinstance(message.value, dict) else None,
+                (
+                    (message.value or {}).get("event_id")
+                    if isinstance(message.value, dict)
+                    else None
+                ),
             )
             metrics.events_dlq_sent_total.labels(reason="duplicate").inc()
             return "duplicate"
@@ -1080,13 +1168,13 @@ class EventConsumer:
     def _commit_message(self, message):
         """
         Precisely commit the offset for this specific message.
-        
+
         Raises exception on commit failure to ensure state consistency.
         Caller must handle commit failures explicitly.
-        
+
         Args:
             message: Kafka message to commit
-            
+
         Raises:
             Exception: If offset commit fails
         """
@@ -1095,7 +1183,7 @@ class EventConsumer:
             # Commit offset+1 (next message to consume)
             offsets = {tp: OffsetAndMetadata(message.offset + 1, None)}
             self._commit_offsets(offsets)
-            
+
             logger.debug(
                 f"✅ Committed offset: topic={message.topic}, partition={message.partition}, "
                 f"offset={message.offset + 1}"
@@ -1138,9 +1226,16 @@ class EventConsumer:
             return ProcessingResult.PERMANENT_FAILURE
 
         try:
-            event_ts_seconds, canonical_timestamp = self._parse_event_timestamp_seconds(raw_timestamp)
+            event_ts_seconds, canonical_timestamp = self._parse_event_timestamp_seconds(
+                raw_timestamp
+            )
         except ValueError as exc:
-            logger.warning("⚠️  Invalid event timestamp event_id=%s timestamp=%r error=%s", event_id, raw_timestamp, exc)
+            logger.warning(
+                "⚠️  Invalid event timestamp event_id=%s timestamp=%r error=%s",
+                event_id,
+                raw_timestamp,
+                exc,
+            )
             return ProcessingResult.PERMANENT_FAILURE
 
         category = self._infer_category(item_id)
@@ -1197,26 +1292,30 @@ class EventConsumer:
             )
             metrics.event_processing_latency_seconds.observe(latency_ms / 1000.0)
             metrics.events_processed_total.labels(result="applied").inc()
-            metrics.redis_operations_total.labels(operation="lua_decay_upsert", status="success").inc()
+            metrics.redis_operations_total.labels(
+                operation="lua_decay_upsert", status="success"
+            ).inc()
             metrics.record_redis_success()
             return ProcessingResult.APPLIED
 
         except Exception as e:
             # Record Redis latency even on exception
-            if 'redis_t0' in locals():
+            if "redis_t0" in locals():
                 redis_latency_s = time.time() - redis_t0
                 metrics.redis_update_latency_seconds.observe(redis_latency_s)
-            
+
             latency_ms = (time.time() - t0) * 1000
             logger.error(
                 f"❌ Failed to update features: event_id={event_id}, user_id={user_id}, item_id={item_id}, error={e}",
-                exc_info=True
+                exc_info=True,
             )
             self.error_count += 1
             metrics.record_redis_error()
-            metrics.redis_operations_total.labels(operation="lua_decay_upsert", status="error").inc()
+            metrics.redis_operations_total.labels(
+                operation="lua_decay_upsert", status="error"
+            ).inc()
             metrics.event_processing_latency_seconds.observe(latency_ms / 1000.0)
-            
+
             # Classify the error to determine retry strategy
             return self._classify_error(e)
 
@@ -1280,10 +1379,14 @@ class EventConsumer:
         # Metadata absent or value is "unknown": cache the absence so we do not
         # hammer Redis for this item on every subsequent event.
         self._category_cache.put(item_id, "unknown")
-        metrics.redis_operations_total.labels(operation="category_lookup", status="miss").inc()
+        metrics.redis_operations_total.labels(
+            operation="category_lookup", status="miss"
+        ).inc()
         return "unknown"
 
-    def _process_message_internal(self, message, commit_immediately: bool) -> Tuple[ProcessingResult, bool, bool]:
+    def _process_message_internal(
+        self, message, commit_immediately: bool
+    ) -> Tuple[ProcessingResult, bool, bool]:
         """
         Process one Kafka message with proper error handling and offset management.
 
@@ -1362,13 +1465,19 @@ class EventConsumer:
 
         elif result == ProcessingResult.PERMANENT_FAILURE:
             # Permanent failure - send to DLQ and commit offset (no retry)
-            event_id = event.get("event_id", "unknown") if isinstance(event, dict) else "unknown"
+            event_id = (
+                event.get("event_id", "unknown")
+                if isinstance(event, dict)
+                else "unknown"
+            )
             logger.error(
                 f"🚨 Permanent failure detected: topic={message.topic}, partition={message.partition}, "
                 f"offset={message.offset}, event_id={event_id}, trace_id={trace_ctx['trace_id']}"
             )
             metrics.events_failed_total.labels(failure_type="permanent").inc()
-            dlq_result = self._send_to_dlq(message, "permanent_failure", "Invalid schema or data format")
+            dlq_result = self._send_to_dlq(
+                message, "permanent_failure", "Invalid schema or data format"
+            )
             if dlq_result in ("sent", "duplicate"):
                 if commit_immediately:
                     try:
@@ -1382,7 +1491,9 @@ class EventConsumer:
                             event_id=event_id,
                             trace_id=trace_ctx["trace_id"],
                         )
-                        metrics.events_commit_failed_total.labels(reason="dlq_send_success").inc()
+                        metrics.events_commit_failed_total.labels(
+                            reason="dlq_send_success"
+                        ).inc()
                         raise DlqPublishedCommitFailedError(
                             f"DLQ published but source commit failed (permanent_failure): "
                             f"topic={message.topic} partition={message.partition} offset={message.offset}"
@@ -1405,7 +1516,11 @@ class EventConsumer:
             next_retry = retry_count + 1
 
             if next_retry <= config.MAX_RETRIES:
-                event_id = event.get("event_id", "unknown") if isinstance(event, dict) else "unknown"
+                event_id = (
+                    event.get("event_id", "unknown")
+                    if isinstance(event, dict)
+                    else "unknown"
+                )
                 try:
                     self._send_to_retry_topic(
                         message,
@@ -1413,7 +1528,9 @@ class EventConsumer:
                         reason="transient_failure",
                     )
                 except Exception as e:
-                    retry_tier_name, retry_topic, _ = self._retry_tier_for_count(next_retry)
+                    retry_tier_name, retry_topic, _ = self._retry_tier_for_count(
+                        next_retry
+                    )
                     logger.error(
                         "Retry routing failed topic=%s partition=%s offset=%s retry_count=%s retry_topic=%s retry_tier=%s trace_id=%s err=%s",
                         message.topic,
@@ -1426,7 +1543,9 @@ class EventConsumer:
                         e,
                     )
                     self.error_count += 1
-                    metrics.kafka_produce_total.labels(topic=retry_tier_name, status="error").inc()
+                    metrics.kafka_produce_total.labels(
+                        topic=retry_tier_name, status="error"
+                    ).inc()
                     metrics.events_failed_total.labels(failure_type="transient").inc()
                     return result, False, False
                 if commit_immediately:
@@ -1478,7 +1597,11 @@ class EventConsumer:
                 return result, True, True
             else:
                 # Max retries exceeded - send to DLQ and commit
-                event_id = event.get("event_id", "unknown") if isinstance(event, dict) else "unknown"
+                event_id = (
+                    event.get("event_id", "unknown")
+                    if isinstance(event, dict)
+                    else "unknown"
+                )
                 logger.error(
                     f"🚨 Max retries exceeded ({config.MAX_RETRIES}): "
                     f"topic={message.topic}, partition={message.partition}, offset={message.offset}, "
@@ -1502,7 +1625,9 @@ class EventConsumer:
                                 event_id=event_id,
                                 trace_id=trace_ctx["trace_id"],
                             )
-                            metrics.events_commit_failed_total.labels(reason="dlq_send_success").inc()
+                            metrics.events_commit_failed_total.labels(
+                                reason="dlq_send_success"
+                            ).inc()
                             raise DlqPublishedCommitFailedError(
                                 f"DLQ published but source commit failed (max_retries_exceeded): "
                                 f"topic={message.topic} partition={message.partition} offset={message.offset}"
@@ -1516,7 +1641,9 @@ class EventConsumer:
                         message.partition,
                         message.offset,
                     )
-                    metrics.kafka_produce_total.labels(topic="dlq", status="error").inc()
+                    metrics.kafka_produce_total.labels(
+                        topic="dlq", status="error"
+                    ).inc()
                     metrics.events_failed_total.labels(failure_type="dlq_failed").inc()
                 self.error_count += 1
                 return result, False, False
@@ -1541,8 +1668,12 @@ class EventConsumer:
         if observability.SPAN_KIND_CONSUMER is not None:
             span_kwargs["kind"] = observability.SPAN_KIND_CONSUMER
 
-        with self.tracer.start_as_current_span("event-consumer.process", **span_kwargs) as span:
-            result, _, _ = self._process_message_internal(message, commit_immediately=True)
+        with self.tracer.start_as_current_span(
+            "event-consumer.process", **span_kwargs
+        ) as span:
+            result, _, _ = self._process_message_internal(
+                message, commit_immediately=True
+            )
             span.set_attribute("messaging.event.result", result.value)
             return result
 
@@ -1553,12 +1684,12 @@ class EventConsumer:
             actual_topics = [config.KAFKA_TOPIC]
         else:
             actual_topics = list(config.KAFKA_RETRY_TOPICS)
-        
+
         logger.info("[START] Event Consumer started")
         logger.info(f"[INFO] Mode: {config.CONSUMER_MODE}")
         logger.info(f"[INFO] Consuming from: {actual_topics}")
         logger.info(f"[INFO] Updating Redis: {config.REDIS_HOST}:{config.REDIS_PORT}")
-        
+
         # Warn if auto_offset_reset=latest is explicitly configured (potential message loss)
         if config.KAFKA_AUTO_OFFSET_RESET == "latest":
             logger.warning(
@@ -1566,7 +1697,7 @@ class EventConsumer:
                 "This may cause data loss on first deployment or after offset deletion. "
                 "Consider using 'earliest' for production deployments."
             )
-        
+
         logger.info("-" * 60)
 
         message_count = 0
@@ -1603,13 +1734,16 @@ class EventConsumer:
                     last_lag_update = now
 
                 # Periodic pause status logging
-                if now - last_metrics_log >= metrics_log_interval and self.paused_partitions:
+                if (
+                    now - last_metrics_log >= metrics_log_interval
+                    and self.paused_partitions
+                ):
                     logger.info(
                         "📊 Retry backoff status: %d partition(s) currently paused",
-                        len(self.paused_partitions)
+                        len(self.paused_partitions),
                     )
                     last_metrics_log = now
-                
+
                 # Process received messages and track highest safe offset per partition.
                 pending_commits: Dict[TopicPartition, OffsetAndMetadata] = {}
                 strict_commit_required = False
@@ -1617,9 +1751,11 @@ class EventConsumer:
                     highest_safe_offset = None
                     for message in messages:
                         try:
-                            _, commit_safe, strict_required = self._process_message_internal(
-                                message,
-                                commit_immediately=False,
+                            _, commit_safe, strict_required = (
+                                self._process_message_internal(
+                                    message,
+                                    commit_immediately=False,
+                                )
                             )
                             if strict_required:
                                 strict_commit_required = True
@@ -1630,7 +1766,10 @@ class EventConsumer:
                                 # never commit beyond a failed message.
                                 break
                             message_count += 1
-                        except (RetryPublishedCommitFailedError, DlqPublishedCommitFailedError):
+                        except (
+                            RetryPublishedCommitFailedError,
+                            DlqPublishedCommitFailedError,
+                        ):
                             # Do NOT swallow: propagate so the process terminates
                             # and Kubernetes restarts it. Downstream write (retry or
                             # DLQ) is already broker-acknowledged; clean restart ensures the
@@ -1642,7 +1781,9 @@ class EventConsumer:
                             self.error_count += 1
                             break
                     if highest_safe_offset is not None:
-                        pending_commits[tp] = OffsetAndMetadata(highest_safe_offset + 1, None)
+                        pending_commits[tp] = OffsetAndMetadata(
+                            highest_safe_offset + 1, None
+                        )
 
                 if pending_commits:
                     try:
@@ -1650,10 +1791,15 @@ class EventConsumer:
                     except Exception as e:
                         logger.critical(
                             "CRITICAL: Batch source offset commit failed offsets=%s err=%s",
-                            {f"{tp.topic}:{tp.partition}": meta.offset for tp, meta in pending_commits.items()},
+                            {
+                                f"{tp.topic}:{tp.partition}": meta.offset
+                                for tp, meta in pending_commits.items()
+                            },
                             e,
                         )
-                        metrics.events_commit_failed_total.labels(reason="batch_commit_failed").inc()
+                        metrics.events_commit_failed_total.labels(
+                            reason="batch_commit_failed"
+                        ).inc()
                         if strict_commit_required:
                             raise RetryPublishedCommitFailedError(
                                 "Batch commit failed after retry/DLQ publish; terminating for clean restart"
@@ -1675,7 +1821,9 @@ class EventConsumer:
             )
             self.loop_alive = False
             metrics.consumer_health.set(0)
-            metrics.consumer_terminations_total.labels(reason="downstream_commit_uncertain").inc()
+            metrics.consumer_terminations_total.labels(
+                reason="downstream_commit_uncertain"
+            ).inc()
             sys.exit(1)
         except Exception as e:
             logger.error("❌ Fatal error in consumer loop: %s", e, exc_info=True)
@@ -1689,7 +1837,9 @@ class EventConsumer:
         finally:
             # Resume any paused partitions before shutdown
             if self.paused_partitions:
-                logger.info(f"🔄 Resuming {len(self.paused_partitions)} paused partition(s) before shutdown")
+                logger.info(
+                    f"🔄 Resuming {len(self.paused_partitions)} paused partition(s) before shutdown"
+                )
                 try:
                     self.consumer.resume(*list(self.paused_partitions.keys()))
                 except Exception as e:
@@ -1819,7 +1969,10 @@ class EventConsumer:
                         "note": "retry consumer — empty assignment is acceptable",
                     }
             else:
-                checks["kafka"] = {"status": "ok", "assigned_partitions": partition_count}
+                checks["kafka"] = {
+                    "status": "ok",
+                    "assigned_partitions": partition_count,
+                }
         except Exception as exc:
             checks["kafka"] = {"status": "error", "detail": type(exc).__name__}
             healthy = False
@@ -1857,14 +2010,14 @@ class EventConsumer:
         """Resume partitions whose retry backoff has expired"""
         if not self.paused_partitions:
             return
-        
+
         now = time.time()
         to_resume = []
-        
+
         for tp, resume_at in list(self.paused_partitions.items()):
             if now >= resume_at:
                 to_resume.append(tp)
-        
+
         if to_resume:
             try:
                 self.consumer.resume(*to_resume)
@@ -1883,7 +2036,7 @@ class EventConsumer:
                 for tp in to_resume:
                     self.paused_partitions.pop(tp, None)
                 metrics.retry_partitions_paused.set(len(self.paused_partitions))
-    
+
     def _update_kafka_lag(self):
         """Update Kafka consumer lag metrics"""
         try:
@@ -1892,16 +2045,15 @@ class EventConsumer:
                 committed = self.consumer.committed(tp)
                 if committed is None:
                     continue
-                
+
                 # Get end offset (high water mark)
                 end_offsets = self.consumer.end_offsets([tp])
                 end_offset = end_offsets.get(tp, 0)
-                
+
                 # Calculate lag
                 lag = end_offset - committed
                 metrics.kafka_consumer_lag.labels(
-                    topic=tp.topic,
-                    partition=str(tp.partition)
+                    topic=tp.topic, partition=str(tp.partition)
                 ).set(max(0, lag))
         except Exception as e:
             logger.warning(f"Failed to update Kafka lag metrics: {e}")
@@ -1909,7 +2061,7 @@ class EventConsumer:
     def close(self):
         """Cleanup resources"""
         logger.info("[SHUTDOWN] Shutting down consumer...")
-        
+
         # Mark consumer as unhealthy during shutdown
         metrics.consumer_health.set(0)
 
@@ -1921,25 +2073,25 @@ class EventConsumer:
                 self.kafka_producer.close(timeout=5)
             except Exception as e:
                 logger.error(f"❌ Error closing Kafka producer: {e}")
-        
+
         if self.consumer:
             try:
                 self.consumer.close()
             except Exception as e:
                 logger.error(f"❌ Error closing consumer: {e}")
-        
+
         if self.redis_client:
             try:
                 self.redis_client.close()
             except Exception as e:
                 logger.error(f"❌ Error closing Redis client: {e}")
-        
+
         if self.metrics_server:
             try:
                 self.metrics_server.stop()
             except Exception as e:
                 logger.error(f"❌ Error stopping metrics server: {e}")
-        
+
         logger.info(
             f"[SUCCESS] Shutdown complete. Total processed: {self.event_count}, errors: {self.error_count}, "
             f"retry_routed: {self.retry_routed_count}, dlq: {self.dlq_count}"

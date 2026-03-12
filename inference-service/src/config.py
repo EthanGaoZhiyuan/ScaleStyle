@@ -24,19 +24,33 @@ class RedisConfig:
     HOST = os.getenv("REDIS_HOST", "localhost")
     PORT = int(os.getenv("REDIS_PORT", "6379"))
     POPULARITY_KEY = os.getenv("POPULARITY_KEY", "global:popular")
-    POPULARITY_BUCKET_PREFIX = os.getenv("POPULARITY_BUCKET_PREFIX", "popularity:bucket")
-    POPULARITY_MATERIALIZED_PREFIX = os.getenv("POPULARITY_MATERIALIZED_PREFIX", "popularity:materialized")
+    POPULARITY_BUCKET_PREFIX = os.getenv(
+        "POPULARITY_BUCKET_PREFIX", "popularity:bucket"
+    )
+    POPULARITY_MATERIALIZED_PREFIX = os.getenv(
+        "POPULARITY_MATERIALIZED_PREFIX", "popularity:materialized"
+    )
     POPULARITY_PRIMARY_WINDOW = os.getenv("POPULARITY_PRIMARY_WINDOW", "24h")
     POPULARITY_SECONDARY_WINDOW = os.getenv("POPULARITY_SECONDARY_WINDOW", "7d")
     POPULARITY_1H_BUCKET_SECONDS = int(os.getenv("POPULARITY_1H_BUCKET_SECONDS", "300"))
-    POPULARITY_24H_BUCKET_SECONDS = int(os.getenv("POPULARITY_24H_BUCKET_SECONDS", "3600"))
-    POPULARITY_7D_BUCKET_SECONDS = int(os.getenv("POPULARITY_7D_BUCKET_SECONDS", "86400"))
+    POPULARITY_24H_BUCKET_SECONDS = int(
+        os.getenv("POPULARITY_24H_BUCKET_SECONDS", "3600")
+    )
+    POPULARITY_7D_BUCKET_SECONDS = int(
+        os.getenv("POPULARITY_7D_BUCKET_SECONDS", "86400")
+    )
     POPULARITY_1H_BUCKET_COUNT = int(os.getenv("POPULARITY_1H_BUCKET_COUNT", "12"))
     POPULARITY_24H_BUCKET_COUNT = int(os.getenv("POPULARITY_24H_BUCKET_COUNT", "24"))
     POPULARITY_7D_BUCKET_COUNT = int(os.getenv("POPULARITY_7D_BUCKET_COUNT", "7"))
-    POPULARITY_1H_MATERIALIZED_TTL_SECONDS = int(os.getenv("POPULARITY_1H_MATERIALIZED_TTL_SECONDS", "60"))
-    POPULARITY_24H_MATERIALIZED_TTL_SECONDS = int(os.getenv("POPULARITY_24H_MATERIALIZED_TTL_SECONDS", "300"))
-    POPULARITY_7D_MATERIALIZED_TTL_SECONDS = int(os.getenv("POPULARITY_7D_MATERIALIZED_TTL_SECONDS", "900"))
+    POPULARITY_1H_MATERIALIZED_TTL_SECONDS = int(
+        os.getenv("POPULARITY_1H_MATERIALIZED_TTL_SECONDS", "60")
+    )
+    POPULARITY_24H_MATERIALIZED_TTL_SECONDS = int(
+        os.getenv("POPULARITY_24H_MATERIALIZED_TTL_SECONDS", "300")
+    )
+    POPULARITY_7D_MATERIALIZED_TTL_SECONDS = int(
+        os.getenv("POPULARITY_7D_MATERIALIZED_TTL_SECONDS", "900")
+    )
     CATEGORY_AFFINITY_TIMESTAMP_SUFFIX = os.getenv(
         "CATEGORY_AFFINITY_TIMESTAMP_SUFFIX",
         ":last_ts",
@@ -47,7 +61,9 @@ class RedisConfig:
             os.getenv("AFFINITY_DECAY_DAYS", "7"),
         )
     )
-    CATEGORY_AFFINITY_DECAY_LAMBDA = math.log(2.0) / (CATEGORY_AFFINITY_HALF_LIFE_DAYS * 86400.0)
+    CATEGORY_AFFINITY_DECAY_LAMBDA = math.log(2.0) / (
+        CATEGORY_AFFINITY_HALF_LIFE_DAYS * 86400.0
+    )
     # Enable TLS in production (EKS) against ElastiCache transit encryption.
     TLS = os.getenv("REDIS_TLS", "false").lower() in ("1", "true", "yes")
 
@@ -165,4 +181,3 @@ class Config:
     DEFAULT_DATA_PATH = "../data-pipeline/data/processed/"
     DATA_PATH = os.getenv("DATA_PATH", DEFAULT_DATA_PATH)
     PORT = 50051
-

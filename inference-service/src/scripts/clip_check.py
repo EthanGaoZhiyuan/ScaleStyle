@@ -150,9 +150,7 @@ def compute_similarity(model, image_paths: list[Path]):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="CLIP Embedding Sanity Check"
-    )
+    parser = argparse.ArgumentParser(description="CLIP Embedding Sanity Check")
     parser.add_argument(
         "--model",
         type=str,

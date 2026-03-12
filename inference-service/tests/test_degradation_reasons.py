@@ -3,29 +3,34 @@ Tests for canonical degradation reason vocabulary.
 
 Contract: docs/DEGRADATION_REASONS.md.
 """
-import pytest
 
 from src.degradation import DegradationReason
 
-CANONICAL_REASONS = frozenset({
-    "REDIS_TIMEOUT",
-    "REDIS_UNAVAILABLE",
-    "PERSONALIZATION_UNAVAILABLE",
-    "INFERENCE_TIMEOUT",
-    "INFERENCE_UNAVAILABLE",
-    "CACHE_MISS",
-    "STALE_DATA_ALLOWED",
-    "DOWNSTREAM_CIRCUIT_OPEN",
-    "DOWNSTREAM_CAPACITY_REJECTED",
-    "EMPTY_RESULTS_ALLOWED",
-})
+CANONICAL_REASONS = frozenset(
+    {
+        "REDIS_TIMEOUT",
+        "REDIS_UNAVAILABLE",
+        "PERSONALIZATION_UNAVAILABLE",
+        "INFERENCE_TIMEOUT",
+        "INFERENCE_UNAVAILABLE",
+        "CACHE_MISS",
+        "STALE_DATA_ALLOWED",
+        "DOWNSTREAM_CIRCUIT_OPEN",
+        "DOWNSTREAM_CAPACITY_REJECTED",
+        "EMPTY_RESULTS_ALLOWED",
+    }
+)
 
 
 def test_degradation_reason_values_are_canonical():
     """All enum values must match the canonical vocabulary."""
     for reason in DegradationReason:
-        assert reason.value in CANONICAL_REASONS, f"{reason.name} value {reason.value} not in canonical set"
-        assert reason.value == reason.name, f"{reason.name} value should match name for .name() compatibility"
+        assert (
+            reason.value in CANONICAL_REASONS
+        ), f"{reason.name} value {reason.value} not in canonical set"
+        assert (
+            reason.value == reason.name
+        ), f"{reason.name} value should match name for .name() compatibility"
 
 
 def test_degradation_reason_no_legacy_strings():
@@ -34,7 +39,9 @@ def test_degradation_reason_no_legacy_strings():
         assert reason.value.isupper(), f"{reason.name} must be UPPER_SNAKE_CASE"
         assert "_" in reason.value or len(reason.value) > 2
         assert " " not in reason.value
-        assert reason.value == reason.value.replace("-", "_"), "Use underscore not hyphen"
+        assert reason.value == reason.value.replace(
+            "-", "_"
+        ), "Use underscore not hyphen"
 
 
 def test_degradation_reason_used_in_metrics_and_logs():

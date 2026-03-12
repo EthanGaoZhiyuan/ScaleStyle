@@ -14,7 +14,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from consumer import apply_decay_update, decay_score, popularity_rank_score
 
-
 HALF_LIFE_SECONDS = 10.0
 DECAY_LAMBDA = math.log(2.0) / HALF_LIFE_SECONDS
 
@@ -67,9 +66,15 @@ def test_global_popularity_ranking_reflects_decay_not_all_time_counts():
     )
     new_actual_now = 1.0
 
-    old_rank = popularity_rank_score(actual_score=1.0, last_update_timestamp=0.0, decay_lambda=DECAY_LAMBDA)
-    new_rank = popularity_rank_score(actual_score=1.0, last_update_timestamp=15.0, decay_lambda=DECAY_LAMBDA)
+    old_rank = popularity_rank_score(
+        actual_score=1.0, last_update_timestamp=0.0, decay_lambda=DECAY_LAMBDA
+    )
+    new_rank = popularity_rank_score(
+        actual_score=1.0, last_update_timestamp=15.0, decay_lambda=DECAY_LAMBDA
+    )
 
     assert old_actual_now == pytest.approx(math.exp(-DECAY_LAMBDA * 15.0), rel=1e-6)
     assert new_actual_now > old_actual_now
-    assert new_rank > old_rank, "Popularity ranking surrogate should prefer the fresher item"
+    assert (
+        new_rank > old_rank
+    ), "Popularity ranking surrogate should prefer the fresher item"

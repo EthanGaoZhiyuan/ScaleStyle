@@ -7,7 +7,9 @@ from tests.utils import FakeHandle
 
 
 def _install_ingress_import_shims() -> None:
-    tracecontext_module = types.ModuleType("opentelemetry.trace.propagation.tracecontext")
+    tracecontext_module = types.ModuleType(
+        "opentelemetry.trace.propagation.tracecontext"
+    )
     tracecontext_module.TraceContextTextMapPropagator = type(
         "TraceContextTextMapPropagator",
         (),
@@ -45,7 +47,9 @@ def _install_ingress_import_shims() -> None:
 
     class DummyTracer:
         def start_as_current_span(self, *_args, **_kwargs):
-            return nullcontext(type("Span", (), {"set_attribute": lambda self, *a, **k: None})())
+            return nullcontext(
+                type("Span", (), {"set_attribute": lambda self, *a, **k: None})()
+            )
 
     class DummyMetric:
         def labels(self, **_kwargs):
@@ -82,7 +86,9 @@ def _install_ingress_import_shims() -> None:
     sys.modules.setdefault("src.utils.observability", observability_module)
     sys.modules.setdefault("src.utils.metrics", metrics_module)
     sys.modules.setdefault("src.personalization", personalization_module)
-    sys.modules.setdefault("src.personalization.metrics", personalization_metrics_module)
+    sys.modules.setdefault(
+        "src.personalization.metrics", personalization_metrics_module
+    )
     for module_name, symbol_name in deployment_stub_names.items():
         module = types.ModuleType(module_name)
         setattr(module, symbol_name, object)
@@ -169,7 +175,13 @@ def test_multimodal_handler_uses_dual_recall_merge_rerank(monkeypatch):
         }
 
     ingress = IngressDeployment(
-        FakeHandle(route=lambda q, user_id=None: {"intent": "SEARCH", "filters": {}, "flow": "smart"}),
+        FakeHandle(
+            route=lambda q, user_id=None: {
+                "intent": "SEARCH",
+                "filters": {},
+                "flow": "smart",
+            }
+        ),
         FakeHandle(embed=lambda q, is_query=True: [0.1, 0.2, 0.3]),
         FakeHandle(search=retrieval_search),
         FakeHandle(topk=lambda k: []),

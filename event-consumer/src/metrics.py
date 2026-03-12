@@ -113,7 +113,10 @@ feature_failures_total = Counter(
 redis_operations_total = Counter(
     "redis_operations_total",
     "Total Redis operations",
-    ["operation", "status"],  # operation: lua_decay_upsert, category_lookup, dlq_mark; status: success, error
+    [
+        "operation",
+        "status",
+    ],  # operation: lua_decay_upsert, category_lookup, dlq_mark; status: success, error
 )
 
 # Kafka operations
@@ -211,7 +214,9 @@ def refresh_redis_unavailable_duration() -> None:
         if _redis_error_streak_started_at is None:
             redis_unavailable_duration_seconds.set(0)
         else:
-            redis_unavailable_duration_seconds.set(time.time() - _redis_error_streak_started_at)
+            redis_unavailable_duration_seconds.set(
+                time.time() - _redis_error_streak_started_at
+            )
 
 
 # Kafka consumer lag (updated periodically if available)

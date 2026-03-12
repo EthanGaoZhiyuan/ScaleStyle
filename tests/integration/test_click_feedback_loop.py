@@ -2,13 +2,11 @@ import json
 import os
 import time
 import uuid
-from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 from urllib import error, parse, request
 
 import pytest
 import redis
-
 
 GATEWAY_BASE_URL = os.getenv("GATEWAY_URL", "http://localhost:8080").rstrip("/")
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
@@ -17,8 +15,12 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 SEARCH_QUERY = os.getenv("E2E_CLICK_FEEDBACK_QUERY", "dress")
 SEARCH_K = int(os.getenv("E2E_CLICK_FEEDBACK_K", "20"))
 CLICK_COUNT = int(os.getenv("E2E_CLICK_FEEDBACK_CLICKS", "6"))
-REDIS_PROCESS_TIMEOUT_SEC = float(os.getenv("E2E_CLICK_FEEDBACK_REDIS_TIMEOUT_SEC", "20"))
-RANKING_SHIFT_TIMEOUT_SEC = float(os.getenv("E2E_CLICK_FEEDBACK_RANKING_TIMEOUT_SEC", "25"))
+REDIS_PROCESS_TIMEOUT_SEC = float(
+    os.getenv("E2E_CLICK_FEEDBACK_REDIS_TIMEOUT_SEC", "20")
+)
+RANKING_SHIFT_TIMEOUT_SEC = float(
+    os.getenv("E2E_CLICK_FEEDBACK_RANKING_TIMEOUT_SEC", "25")
+)
 POLL_INTERVAL_SEC = float(os.getenv("E2E_CLICK_FEEDBACK_POLL_INTERVAL_SEC", "0.8"))
 
 
@@ -33,7 +35,12 @@ def redis_client() -> redis.Redis:
     client.close()
 
 
-def _http_json(method: str, url: str, payload: Optional[Dict[str, Any]] = None, timeout: float = 5.0) -> Tuple[int, Any]:
+def _http_json(
+    method: str,
+    url: str,
+    payload: Optional[Dict[str, Any]] = None,
+    timeout: float = 5.0,
+) -> Tuple[int, Any]:
     body = None
     headers = {}
     if payload is not None:
@@ -79,7 +86,9 @@ def _extract_items(response_body: Any) -> List[Dict[str, Any]]:
 
 
 def _search(user_id: str, query_text: str, k: int) -> List[Dict[str, Any]]:
-    params = parse.urlencode({"query": query_text, "userId": user_id, "k": k, "debug": "false"})
+    params = parse.urlencode(
+        {"query": query_text, "userId": user_id, "k": k, "debug": "false"}
+    )
     url = f"{GATEWAY_BASE_URL}/api/recommendation/search?{params}"
     status, body = _http_json("GET", url, timeout=8.0)
     assert status == 200, f"search failed status={status}, body={body}"
@@ -88,7 +97,9 @@ def _search(user_id: str, query_text: str, k: int) -> List[Dict[str, Any]]:
     return items
 
 
-def _send_click(user_id: str, session_id: str, item_id: str, query_text: str, position: int) -> None:
+def _send_click(
+    user_id: str, session_id: str, item_id: str, query_text: str, position: int
+) -> None:
     payload = {
         "user_id": user_id,
         "item_id": item_id,
@@ -98,8 +109,12 @@ def _send_click(user_id: str, session_id: str, item_id: str, query_text: str, po
         "position": max(0, position),
         "device": "pytest-e2e",
     }
-    status, body = _http_json("POST", f"{GATEWAY_BASE_URL}/api/events/click", payload=payload, timeout=8.0)
-    assert status == 200, f"click failed status={status}, body={body}, payload={payload}"
+    status, body = _http_json(
+        "POST", f"{GATEWAY_BASE_URL}/api/events/click", payload=payload, timeout=8.0
+    )
+    assert (
+        status == 200
+    ), f"click failed status={status}, body={body}, payload={payload}"
 
 
 def _cleanup_user_keys(client: redis.Redis, user_id: str) -> None:
@@ -121,7 +136,9 @@ def _rank_map(items: List[Dict[str, Any]]) -> Dict[str, int]:
     return out
 
 
-def _target_category_from_baseline(items: List[Dict[str, Any]]) -> Tuple[str, List[str]]:
+def _target_category_from_baseline(
+    items: List[Dict[str, Any]],
+) -> Tuple[str, List[str]]:
     grouped: Dict[str, List[str]] = {}
     for item in items:
         item_id = str(item.get("itemId") or "").strip()
@@ -167,15 +184,20 @@ def test_click_feedback_loop_changes_ranking(redis_client: redis.Redis) -> None:
         baseline_items = _search(user_id=user_id, query_text=SEARCH_QUERY, k=SEARCH_K)
         baseline_rank = _rank_map(baseline_items)
 
-        target_category, target_item_ids = _target_category_from_baseline(baseline_items)
+        target_category, target_item_ids = _target_category_from_baseline(
+            baseline_items
+        )
         if not target_category or len(target_item_ids) < 2:
-            pytest.skip("Not enough categorized baseline items to run deterministic feedback assertion")
+            pytest.skip(
+                "Not enough categorized baseline items to run deterministic feedback assertion"
+            )
 
         clicked_item_ids = target_item_ids[: min(3, len(target_item_ids))]
         category_before_top5 = sum(
             1
             for item in baseline_items[:5]
-            if _normalize_category(item.get("category")) == _normalize_category(target_category)
+            if _normalize_category(item.get("category"))
+            == _normalize_category(target_category)
         )
 
         for idx in range(CLICK_COUNT):
@@ -217,7 +239,9 @@ def test_click_feedback_loop_changes_ranking(redis_client: redis.Redis) -> None:
             timeout_sec=REDIS_PROCESS_TIMEOUT_SEC,
             interval_sec=POLL_INTERVAL_SEC,
         )
-        assert redis_ready, f"consumer update not observed in Redis within timeout: {redis_details}"
+        assert (
+            redis_ready
+        ), f"consumer update not observed in Redis within timeout: {redis_details}"
 
         baseline_order_top10 = [str(item.get("itemId")) for item in baseline_items[:10]]
 
@@ -236,11 +260,14 @@ def test_click_feedback_loop_changes_ranking(redis_client: redis.Redis) -> None:
             category_after_top5 = sum(
                 1
                 for item in after_items[:5]
-                if _normalize_category(item.get("category")) == _normalize_category(target_category)
+                if _normalize_category(item.get("category"))
+                == _normalize_category(target_category)
             )
             concentration_delta = category_after_top5 - category_before_top5
 
-            measurable = ranking_changed and (best_lift >= 1 or concentration_delta >= 1)
+            measurable = ranking_changed and (
+                best_lift >= 1 or concentration_delta >= 1
+            )
             details = {
                 "ranking_changed": ranking_changed,
                 "best_clicked_item_rank_lift": best_lift,

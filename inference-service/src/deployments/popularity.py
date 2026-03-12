@@ -5,7 +5,10 @@ from ray import serve
 from typing import Any, Dict, List
 
 from src.config import RedisConfig
-from src.personalization.popularity_windows import active_bucket_keys, materialized_window_key
+from src.personalization.popularity_windows import (
+    active_bucket_keys,
+    materialized_window_key,
+)
 from src.utils.redis_client import RedisClient
 from src.utils.redis_metadata import canonical_article_id, item_key
 from src.utils.metrics import counter, histogram
@@ -82,9 +85,13 @@ class PopularityDeployment:
     def _materialization_lock_key(self, materialized_key: str) -> str:
         return f"lock:{materialized_key}"
 
-    def _ensure_materialized_window(self, window_name: str, now_ts: float | None = None) -> str:
+    def _ensure_materialized_window(
+        self, window_name: str, now_ts: float | None = None
+    ) -> str:
         spec = self._window_specs[window_name]
-        materialized_key = materialized_window_key(window_name, spec["bucket_seconds"], now_ts)
+        materialized_key = materialized_window_key(
+            window_name, spec["bucket_seconds"], now_ts
+        )
         ttl = self.redis.ttl(materialized_key)
         if ttl > 0:
             return materialized_key
@@ -159,11 +166,15 @@ class PopularityDeployment:
         t_request_start = time.perf_counter()
         try:
             materialize_start = time.perf_counter()
-            primary_key = await asyncio.to_thread(self._ensure_materialized_window, self.primary_window)
-            self.metrics["redis_ops_total"].labels(operation="materialize_primary", status="success").inc()
-            self.metrics["redis_op_duration_seconds"].labels(operation="materialize_primary").observe(
-                time.perf_counter() - materialize_start
+            primary_key = await asyncio.to_thread(
+                self._ensure_materialized_window, self.primary_window
             )
+            self.metrics["redis_ops_total"].labels(
+                operation="materialize_primary", status="success"
+            ).inc()
+            self.metrics["redis_op_duration_seconds"].labels(
+                operation="materialize_primary"
+            ).observe(time.perf_counter() - materialize_start)
 
             t_op_start = time.perf_counter()
             ids_with_scores = await asyncio.to_thread(
@@ -173,25 +184,39 @@ class PopularityDeployment:
                 max(0, k - 1),
                 withscores=True,
             )
-            self.metrics["redis_ops_total"].labels(operation="zrevrange_primary", status="success").inc()
-            self.metrics["redis_op_duration_seconds"].labels(operation="zrevrange_primary").observe(
-                time.perf_counter() - t_op_start
-            )
+            self.metrics["redis_ops_total"].labels(
+                operation="zrevrange_primary", status="success"
+            ).inc()
+            self.metrics["redis_op_duration_seconds"].labels(
+                operation="zrevrange_primary"
+            ).observe(time.perf_counter() - t_op_start)
         except Exception as e:
-            self.metrics["redis_ops_total"].labels(operation="materialize_primary", status="error").inc()
+            self.metrics["redis_ops_total"].labels(
+                operation="materialize_primary", status="error"
+            ).inc()
             self.metrics["requests_total"].labels(status="error").inc()
-            self.metrics["request_duration_seconds"].observe(time.perf_counter() - t_request_start)
-            logger.error("Failed to read primary popularity window=%s err=%s", self.primary_window, e)
+            self.metrics["request_duration_seconds"].observe(
+                time.perf_counter() - t_request_start
+            )
+            logger.error(
+                "Failed to read primary popularity window=%s err=%s",
+                self.primary_window,
+                e,
+            )
             return []
 
         if not ids_with_scores and self.secondary_window:
             try:
                 materialize_start = time.perf_counter()
-                secondary_key = await asyncio.to_thread(self._ensure_materialized_window, self.secondary_window)
-                self.metrics["redis_ops_total"].labels(operation="materialize_secondary", status="success").inc()
-                self.metrics["redis_op_duration_seconds"].labels(operation="materialize_secondary").observe(
-                    time.perf_counter() - materialize_start
+                secondary_key = await asyncio.to_thread(
+                    self._ensure_materialized_window, self.secondary_window
                 )
+                self.metrics["redis_ops_total"].labels(
+                    operation="materialize_secondary", status="success"
+                ).inc()
+                self.metrics["redis_op_duration_seconds"].labels(
+                    operation="materialize_secondary"
+                ).observe(time.perf_counter() - materialize_start)
                 t_op_start = time.perf_counter()
                 ids_with_scores = await asyncio.to_thread(
                     self.redis.zrevrange,
@@ -200,15 +225,25 @@ class PopularityDeployment:
                     max(0, k - 1),
                     withscores=True,
                 )
-                self.metrics["redis_ops_total"].labels(operation="zrevrange_secondary", status="success").inc()
-                self.metrics["redis_op_duration_seconds"].labels(operation="zrevrange_secondary").observe(
-                    time.perf_counter() - t_op_start
-                )
+                self.metrics["redis_ops_total"].labels(
+                    operation="zrevrange_secondary", status="success"
+                ).inc()
+                self.metrics["redis_op_duration_seconds"].labels(
+                    operation="zrevrange_secondary"
+                ).observe(time.perf_counter() - t_op_start)
             except Exception as e:
-                self.metrics["redis_ops_total"].labels(operation="materialize_secondary", status="error").inc()
+                self.metrics["redis_ops_total"].labels(
+                    operation="materialize_secondary", status="error"
+                ).inc()
                 self.metrics["requests_total"].labels(status="error").inc()
-                self.metrics["request_duration_seconds"].observe(time.perf_counter() - t_request_start)
-                logger.error("Failed to read secondary popularity window=%s err=%s", self.secondary_window, e)
+                self.metrics["request_duration_seconds"].observe(
+                    time.perf_counter() - t_request_start
+                )
+                logger.error(
+                    "Failed to read secondary popularity window=%s err=%s",
+                    self.secondary_window,
+                    e,
+                )
                 return []
 
         ids = [canonical_article_id(item_id) for item_id, _ in ids_with_scores]
@@ -222,12 +257,16 @@ class PopularityDeployment:
             rows = await asyncio.to_thread(pipe.execute, raise_on_error=False)
             metadata_op_elapsed = time.perf_counter() - t_op_start
         except Exception as e:
-            self.metrics["redis_ops_total"].labels(operation="metadata", status="error").inc()
-            self.metrics["redis_op_duration_seconds"].labels(operation="metadata").observe(
-                time.perf_counter() - t_op_start
-            )
+            self.metrics["redis_ops_total"].labels(
+                operation="metadata", status="error"
+            ).inc()
+            self.metrics["redis_op_duration_seconds"].labels(
+                operation="metadata"
+            ).observe(time.perf_counter() - t_op_start)
             self.metrics["requests_total"].labels(status="error").inc()
-            self.metrics["request_duration_seconds"].observe(time.perf_counter() - t_request_start)
+            self.metrics["request_duration_seconds"].observe(
+                time.perf_counter() - t_request_start
+            )
             logger.error("Failed to read popularity metadata pipeline: %s", e)
             return []
 
@@ -247,10 +286,14 @@ class PopularityDeployment:
             )
         metadata_status = "error" if metadata_errors > 0 else "success"
         request_status = "partial" if metadata_errors > 0 else "success"
-        self.metrics["redis_ops_total"].labels(operation="metadata", status=metadata_status).inc()
+        self.metrics["redis_ops_total"].labels(
+            operation="metadata", status=metadata_status
+        ).inc()
         self.metrics["redis_op_duration_seconds"].labels(operation="metadata").observe(
             metadata_op_elapsed
         )
         self.metrics["requests_total"].labels(status=request_status).inc()
-        self.metrics["request_duration_seconds"].observe(time.perf_counter() - t_request_start)
+        self.metrics["request_duration_seconds"].observe(
+            time.perf_counter() - t_request_start
+        )
         return results

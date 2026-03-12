@@ -78,9 +78,7 @@ class EmbeddingDeployment:
             # Set model to evaluation mode (disable dropout, etc.)
             self.model.to(self.device).eval()
             t_model = (time.time() - t1) * 1000
-            logger.info(
-                f"Model loaded and moved to {self.device} in {t_model:.2f}ms"
-            )
+            logger.info(f"Model loaded and moved to {self.device} in {t_model:.2f}ms")
 
             # Model warmup: run a dummy inference to initialize all components
             logger.info("Warming up model with dummy inference...")

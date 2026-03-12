@@ -6,13 +6,10 @@ be used by serving code.
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from personalization.feature_reader import FeatureReader
 from personalization.null_feature_reader import NullFeatureReader
-from personalization.snapshot_loader import PersonalizationSnapshotLoader
 
 
 def test_feature_reader_implements_snapshot_loader_only():

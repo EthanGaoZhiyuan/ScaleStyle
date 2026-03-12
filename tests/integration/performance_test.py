@@ -842,7 +842,9 @@ def test_f1_fallback_performance(result_file: str):
 def main():
     global GATEWAY_URL, TEST_OUTPUT_DIR
 
-    parser = argparse.ArgumentParser(description="Integration Performance Tests (D/E/F)")
+    parser = argparse.ArgumentParser(
+        description="Integration Performance Tests (D/E/F)"
+    )
     parser.add_argument("--gateway", default=GATEWAY_URL, help="Gateway URL")
     parser.add_argument(
         "--output-dir", default=TEST_OUTPUT_DIR, help="Output directory"

@@ -239,14 +239,17 @@ def run_all_tests():
     print("\nChecking dependencies...")
     try:
         import importlib.util
-        
-        required_modules = ['torch', 'PIL', 'sentence_transformers', 'pandas']
-        missing = [mod for mod in required_modules if importlib.util.find_spec(mod) is None]
-        
+
+        required_modules = ["torch", "PIL", "sentence_transformers", "pandas"]
+        missing = [
+            mod for mod in required_modules if importlib.util.find_spec(mod) is None
+        ]
+
         if missing:
             raise ImportError(f"Missing modules: {', '.join(missing)}")
-        
+
         import torch  # noqa: F401
+
         print("✅ All dependencies available")
     except ImportError as e:
         print(f"❌ Missing dependency: {e}")

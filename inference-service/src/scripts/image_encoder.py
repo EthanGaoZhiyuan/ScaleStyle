@@ -75,12 +75,12 @@ class ImageEncoder:
         start_time = time.time()
         self.model_name = model
         model_id = model_configs[model]
-        
+
         # Load CLIP model and processor
         self.model = CLIPModel.from_pretrained(model_id).to(device)
         self.processor = CLIPProcessor.from_pretrained(model_id)
         self.model.eval()  # Set to evaluation mode
-        
+
         load_time = time.time() - start_time
 
         print(f"✅ Model loaded in {load_time:.2f}s\n")
@@ -106,7 +106,7 @@ class ImageEncoder:
 
             # Preprocess and generate embedding
             inputs = self.processor(images=img, return_tensors="pt").to(self.device)
-            
+
             with torch.no_grad():
                 image_features = self.model.get_image_features(**inputs)
                 # Normalize to unit vector (L2 normalization)
@@ -185,7 +185,9 @@ class ImageEncoder:
             # Encode batch
             batch_start = time.time()
             with torch.no_grad():
-                inputs = self.processor(images=images, return_tensors="pt", padding=True).to(self.device)
+                inputs = self.processor(
+                    images=images, return_tensors="pt", padding=True
+                ).to(self.device)
                 image_features = self.model.get_image_features(**inputs)
                 # Normalize embeddings (L2 normalization)
                 embeddings = image_features / image_features.norm(dim=-1, keepdim=True)

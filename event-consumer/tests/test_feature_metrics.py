@@ -1,7 +1,6 @@
 """Unified metrics tests for current EventConsumer and prometheus_client metrics behavior."""
 
 import os
-import json
 import sys
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
@@ -18,12 +17,14 @@ from consumer import EventConsumer, ProcessingResult
 
 @pytest.fixture
 def consumer_ctx():
-    with patch("consumer.MetricsServer") as mock_metrics_server_cls, \
-         patch("consumer.redis.Redis") as mock_redis_cls, \
-         patch("consumer.KafkaConsumer") as mock_kafka_cls, \
-         patch("consumer.KafkaProducer") as mock_kafka_producer_cls, \
-         patch("consumer.metrics") as mock_metrics:
-        
+    with patch("consumer.MetricsServer") as mock_metrics_server_cls, patch(
+        "consumer.redis.Redis"
+    ) as mock_redis_cls, patch("consumer.KafkaConsumer") as mock_kafka_cls, patch(
+        "consumer.KafkaProducer"
+    ) as mock_kafka_producer_cls, patch(
+        "consumer.metrics"
+    ) as mock_metrics:
+
         redis_client = Mock()
         redis_client.ping.return_value = True
         redis_client.hget.return_value = "dress"
@@ -43,9 +44,14 @@ def consumer_ctx():
 
         # Mock all prometheus metrics
         for attr in [
-            "events_processed_total", "events_failed_total", "events_duplicate_total",
-            "feature_updates_total", "feature_failures_total", "redis_operations_total",
-            "event_processing_latency_seconds", "redis_update_latency_seconds"
+            "events_processed_total",
+            "events_failed_total",
+            "events_duplicate_total",
+            "feature_updates_total",
+            "feature_failures_total",
+            "redis_operations_total",
+            "event_processing_latency_seconds",
+            "redis_update_latency_seconds",
         ]:
             metric_mock = MagicMock()
             metric_mock.labels.return_value = metric_mock
@@ -88,7 +94,9 @@ class TestCategoryAndLuaMetrics:
             operation="category_lookup", status="success"
         )
 
-    def test_category_lookup_miss_and_unknown_increment(self, consumer_ctx, valid_event):
+    def test_category_lookup_miss_and_unknown_increment(
+        self, consumer_ctx, valid_event
+    ):
         consumer, redis_client, lua_script, mock_metrics = consumer_ctx
         lua_script.return_value = "OK"
         redis_client.hget.return_value = None
