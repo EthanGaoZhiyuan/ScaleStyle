@@ -148,4 +148,7 @@ docs/phase3/*
 docs/contracts/*
 WEEK2_QUICKSTART.md
 docs/*
+!docs/assets/
+!docs/assets/architecture/
+!docs/assets/architecture/*.png
 WEEK2_CLOSING_PASS_REPORT.md

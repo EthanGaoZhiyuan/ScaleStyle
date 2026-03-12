@@ -31,6 +31,10 @@ The system is designed to run on Kubernetes (Minikube for local development, EKS
 
 ## System Architecture
 
+The overview below shows the synchronous serving path, the asynchronous feedback loop, and the production deployment concerns at a system level.
+
+![Production-oriented recommendation system architecture](docs/assets/architecture/production-recommendation-system-architecture.png)
+
 ### Subsystems
 
 **Gateway Service** (`gateway-service/`, Spring Boot, Java 21) is the public API entry point. It validates requests, maintains a two-tier product metadata cache (Caffeine L1 + Redis L2), dispatches recommendation requests to the inference service over HTTP using Reactor WebClient, and publishes click events to Kafka with broker acknowledgment. Resilience4j provides a circuit breaker around the inference HTTP call; on open circuit, the gateway falls back to materialized popularity-window data in Redis.
@@ -137,69 +141,6 @@ Redis  (updated online features read by next inference request)
 
 ---
 
-## Architecture Diagram
-
-```
-┌────────────────────────────────────────────────────────────────┐
-│                        CLIENT                                  │
-└──────────────────────────┬─────────────────────────────────────┘
-                           │  HTTP (REST)
-                           ▼
-┌──────────────────────────────────────────────────────────────┐
-│                  GATEWAY SERVICE  :8080                       │
-│  Spring Boot · Java 21 · Tomcat (200 threads)                │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────────┐ │
-│  │ Rec Search  │  │ Image Search │  │  Event /click track  │ │
-│  └──────┬──────┘  └──────┬───────┘  └──────────┬───────────┘ │
-│         │  WebClient      │                     │ KafkaTemplate│
-│  ┌──────▼──────────┐      │           ┌─────────▼──────────┐  │
-│  │ Circuit Breaker │      │           │   Kafka Producer   │  │
-│  │  (Resilience4j) │      │           │  acks=all, lz4     │  │
-│  └──────┬──────────┘      │           └────────────────────┘  │
-│         │ HTTP (450ms TO) │                                    │
-└─────────┼─────────────────┼────────────────────────────────────┘
-          │                 │
-          ▼                 ▼
-┌──────────────────────────────────────────────────────────────┐
-│              INFERENCE SERVICE  :8000                         │
-│  Python · Ray Serve · FastAPI                                │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────┐ │
-│  │Embedding │  │Retrieval │  │Reranker  │  │ Popularity  │ │
-│  │BGE-large │  │Milvus ANN│  │CrossEnc. │  │ (Redis ZSET)│ │
-│  └──────────┘  └──────────┘  └──────────┘  └─────────────┘ │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │  PersonalizationSnapshot  +  BehaviorBoost              │ │
-│  └─────────────────────────────────────────────────────────┘ │
-└────────────────────────────────────────────────────────────────┘
-          │                 │
-          ▼                 ▼
-┌──────────────┐   ┌─────────────────────────────────────────┐
-│   MILVUS     │   │               REDIS  :6379              │
-│  Vector DB   │   │  item:{id} hashes  (product metadata)   │
-│  IVF_FLAT    │   │  user:{id}:clicks  (recent history)     │
-│  IP metric   │   │  user:{id}:affinity:{cat}  (decay score)│
-└──────────────┘   │  popularity:bucket:{w}:{ts}  (buckets)  │
-                   │  popularity:materialized:{w} (fallback)  │
-                   │  global:popular (ZSET, seed)             │
-                   └────────────────────▲────────────────────┘
-                                        │ Lua atomic writes
-                   ┌────────────────────┴────────────────────┐
-                   │   EVENT CONSUMER (primary + retry)       │
-                   │   Python · kafka-python                  │
-                   └────────────────────▲────────────────────┘
-                                        │
-                   ┌────────────────────┴────────────────────┐
-                   │         KAFKA  :9092                      │
-                   │  scalestyle.clicks                        │
-                   │  scalestyle.clicks.retry.1s/10s/60s      │
-                   │  scalestyle.clicks.dlq                   │
-                   └──────────────────────────────────────────┘
-
-Observability: Prometheus · Grafana · Jaeger (OTEL traces)
-```
-
----
-
 ## Repository Structure
 
 ```
@@ -302,6 +243,10 @@ ScaleStyle/
 ---
 
 ## Request Lifecycle — End-to-End Flow
+
+The runtime view below complements the step-by-step lifecycle by showing the hot synchronous request path, the asynchronous event path, and the storage and observability dependencies in one place.
+
+![Detailed runtime architecture](docs/assets/architecture/detailed-runtime-architecture.png)
 
 ### Text Recommendation Search
 
