@@ -1,0 +1,116 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-consumer-retry
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: event-consumer
+    role: retry-processor
+    consumer-mode: retry
+spec:
+  replicas: 1
+  # Rolling update: maxUnavailable:0 prevents partition coverage gaps.
+  # The retry consumer runs as a single replica; maxSurge:1 ensures the new pod
+  # is fully Ready (partition assigned, poll active) before the old one stops.
+  # NotReady on the retry consumer is safe — it does not restart the pod and
+  # empty partition assignment is accepted (all retry tiers may be idle).
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: scalestyle
+      component: event-consumer
+      consumer-mode: retry
+  template:
+    metadata:
+      labels:
+        app: scalestyle
+        component: event-consumer
+        role: retry-processor
+        consumer-mode: retry
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: event-consumer-retry
+        image: scalestyle-event-consumer:__MUST_BE_OVERRIDDEN_BY_KUSTOMIZE__
+        # IfNotPresent is correct for production, but ONLY when the tag is immutable
+        # (e.g. "git-3f8c9ab").  The EKS overlay replaces both image name and tag via
+        # kustomization.yaml images[].newTag, which is injected by sync-ecr-images.sh.
+        # Never deploy with newTag:latest in the overlay — it violates this contract.
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CONSUMER_MODE
+          value: "retry"
+        # Same REDIS_SOCKET_TIMEOUT override as event-consumer-primary — see that
+        # deployment for the full rationale.
+        - name: REDIS_SOCKET_TIMEOUT
+          value: "0.5"
+        - name: REDIS_SOCKET_CONNECT_TIMEOUT
+          value: "0.5"
+        - name: KAFKA_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: event-consumer-retry-kafka-auth
+              key: KAFKA_USERNAME
+        - name: KAFKA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: event-consumer-retry-kafka-auth
+              key: KAFKA_PASSWORD
+        - name: KAFKA_SSL_CAFILE
+          value: "/etc/kafka/secrets/ca.crt"
+        envFrom:
+        - configMapRef:
+            name: scalestyle-config
+        - configMapRef:
+            name: scalestyle-cloud-config
+            optional: true
+        ports:
+        - name: metrics
+          containerPort: 8000
+          protocol: TCP
+        volumeMounts:
+        - name: kafka-cluster-ca
+          mountPath: /etc/kafka/secrets
+          readOnly: true
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "128Mi"
+          limits:
+            cpu: "250m"
+            memory: "256Mi"
+        # readinessProbe: dependency-sensitive checks (Kafka assignment, poll freshness,
+        # Redis).  Retry consumer tolerates empty partition assignment (retry tiers may
+        # be idle), so NotReady periods are expected and do not trigger restarts.
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        # livenessProbe: in-process checks only (loop alive, poll not stale >300 s).
+        # Same conservative posture as primary: prevent restart storms during rebalances.
+        livenessProbe:
+          httpGet:
+            path: /live
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+      volumes:
+      - name: kafka-cluster-ca
+        secret:
+          secretName: kafka-cluster-ca

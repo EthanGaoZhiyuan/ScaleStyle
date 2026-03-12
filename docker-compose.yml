@@ -1,5 +1,27 @@
 version: '3.8'
 
+# ScaleStyle Docker Compose - Local Development Stack
+#
+# Port Mapping Summary (Host:Container):
+#   - Gateway:              8080:8080  (API)
+#   - Inference:            8000:8000  (Recommendations + Metrics)
+#   - Event Consumer (Pri): 8081:8000  (Metrics)
+#   - Event Consumer (Ret): 8082:8000  (Metrics)
+#   - Milvus:               19530:19530 (Vector DB)
+#   - Redis:                6379:6379  (Cache)
+#   - Kafka:                9092:9092  (Events)
+#   - Prometheus:           9090:9090  (Metrics)
+#   - Grafana:              3000:3000  (Dashboards)
+#   - Jaeger:               16686:16686 (Tracing UI)
+#
+# Usage:
+#   docker-compose up -d
+#   Access API: http://localhost:8080/api/recommendation/search?query=dress
+#   Access Metrics:
+#     - Inference:  http://localhost:8000/metrics
+#     - Consumer 1: http://localhost:8081/metrics
+#     - Consumer 2: http://localhost:8082/metrics
+
 services:
   # ==========================================
   # 1. Java Gateway Service (Spring Boot)
@@ -16,13 +38,16 @@ services:
       - METADATA_PATH=/app/data/product_metadata.json
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      # Kafka configuration (Week 2)
+      # Kafka configuration
       - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_SECURITY_PROTOCOL=PLAINTEXT  # Local dev only; overridden to SASL_SSL in k8s/production
       # OpenTelemetry configuration
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
     volumes:
       - ./data-pipeline/data/processed:/app/data
     depends_on:
+      kafka:
+        condition: service_started
       inference-service:
         condition: service_healthy
     networks:
@@ -44,6 +69,9 @@ services:
       - MILVUS_COLLECTION=scale_style_bge_v2
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      # Ray memory configuration (local dev with generation enabled)
+      - RAY_MEMORY_GB=6.0
+      - RAY_OBJECT_STORE_GB=1.0
       # HF cache in container
       - HF_HOME=/cache/huggingface
       - TRANSFORMERS_CACHE=/cache/huggingface/hub
@@ -71,7 +99,7 @@ services:
       - HF_HUB_DISABLE_TELEMETRY=1
       - TOKENIZERS_PARALLELISM=false
       
-      # ----- Week 2: Behavior Boost (P1.3 configurable) -----
+      # ----- Behavior Boost (configurable) -----
       - EXACT_CLICK_BOOST=1.5           # Multiplier for exact item match
       - CATEGORY_AFFINITY_BOOST=1.2     # Multiplier for category affinity
       - MAX_RECENT_CLICKS_USED=20       # Max recent clicks to consider
@@ -189,12 +217,25 @@ services:
       - scalestyle-net
   # ==========================================
   # 7. Redis (In-Memory Data Store)
+  # Persistence: AOF (append-only file) + RDB snapshots for durability
   # ==========================================
   redis:
     container_name: scalestyle-redis
     image: redis:7.0-alpine
+    # Enable AOF persistence for event deduplication correctness
+    # - appendonly yes: log every write operation
+    # - appendfsync everysec: fsync every second (balance durability/performance)
+    # - save config: RDB snapshots at 60s/1000 ops and 300s/100 ops
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --save 60 1000
+      --save 300 100
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data  # Mount persistent volume for AOF and RDB files
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -205,7 +246,7 @@ services:
 
   # ==========================================
   # 7. Zookeeper (Kafka coordination)
-  # Week 2: Real-time behavior loop
+  # Real-time behavior loop
   # ==========================================
   zookeeper:
     container_name: scalestyle-zookeeper
@@ -218,7 +259,7 @@ services:
 
   # ==========================================
   # 8. Kafka (Event streaming)
-  # Week 2: Real-time behavior loop
+  # Real-time behavior loop
   # ==========================================
   kafka:
     container_name: scalestyle-kafka
@@ -242,19 +283,22 @@ services:
       - scalestyle-net
 
   # ==========================================
-  # 9. Event Consumer (Kafka consumer)
-  # Week 2: Real-time behavior loop
+  # 9. Event Consumer - Primary (Kafka consumer for main traffic)
+  # Real-time behavior loop - main traffic path
   # ==========================================
-  event-consumer:
-    container_name: scalestyle-event-consumer
+  event-consumer-primary:
+    container_name: scalestyle-event-consumer-primary
     build:
       context: ./event-consumer
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"  # Metrics endpoint
+      - "8081:8000"  # Metrics endpoint (host port 8081 to avoid conflict with inference-service)
     environment:
+      - CONSUMER_MODE=primary
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_SECURITY_PROTOCOL=PLAINTEXT  # Local dev only; overridden to SASL_SSL in k8s/production
       - KAFKA_TOPIC=scalestyle.clicks
+      - KAFKA_RETRY_TOPIC=scalestyle.clicks.retry
       - KAFKA_GROUP_ID=event-consumer
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -272,7 +316,45 @@ services:
       - scalestyle-net
 
   # ==========================================
-  # 10. Jaeger (Distributed Tracing)
+  # 10. Event Consumer - Retry (Kafka consumer for retry traffic)
+  # Handles transient failures with exponential backoff
+  # ==========================================
+  event-consumer-retry:
+    container_name: scalestyle-event-consumer-retry
+    build:
+      context: ./event-consumer
+      dockerfile: Dockerfile
+    ports:
+      - "8082:8000"  # Metrics endpoint (host port 8082 to avoid conflicts)
+    environment:
+      - CONSUMER_MODE=retry
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_SECURITY_PROTOCOL=PLAINTEXT  # Local dev only; overridden to SASL_SSL in k8s/production
+      - KAFKA_TOPIC=scalestyle.clicks
+      - KAFKA_RETRY_TOPIC_1S=scalestyle.clicks.retry.1s
+      - KAFKA_RETRY_TOPIC_10S=scalestyle.clicks.retry.10s
+      - KAFKA_RETRY_TOPIC_60S=scalestyle.clicks.retry.60s
+      - KAFKA_DLQ_TOPIC=scalestyle.clicks.dlq
+      - KAFKA_GROUP_ID=event-consumer
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MAX_RETRIES=3
+      - RETRY_ENFORCE_DELAY=true
+      - RECENT_CLICKS_MAX=100
+      - AFFINITY_DECAY_DAYS=7
+      - LOG_INTERVAL=100
+      - METRICS_PORT=8000
+    depends_on:
+      kafka:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - scalestyle-net
+
+  # ==========================================
+  # 11. Jaeger (Distributed Tracing)
   # ==========================================
   jaeger:
     container_name: scalestyle-jaeger

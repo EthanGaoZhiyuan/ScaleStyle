@@ -1,13 +1,17 @@
 # ScaleStyle Kubernetes Deployment Makefile
-# Week 4: Production K8s deployment
+# Production K8s deployment
 
 .PHONY: help k8s-setup k8s-apply k8s-delete k8s-status k8s-logs-gateway k8s-logs-inference \
-        milvus-install milvus-uninstall data-init build-images push-images deploy-all clean-all
+	milvus-install milvus-uninstall data-init build-images push-images deploy-all clean-all \
+	tf-init tf-plan tf-apply tf-destroy eks-kubeconfig kafka-install-strimzi kafka-deploy \
+	kafka-status kafka-topic-verify kafka-smoke eks-sync-ecr-images bootstrap-kafka \
+	apply-cloud-config install-alb-controller deploy-milvus deploy-production destroy-production verify-deployment push-ecr-images
 
 # Default Docker Hub username (override with: make deploy-all DOCKERHUB_USER=yourname)
 DOCKERHUB_USER ?= your-dockerhub-username
 IMAGE_TAG ?= latest
 NAMESPACE := scalestyle
+TF_DIR := infrastructure/terraform
 
 # Colors for output
 GREEN := \033[0;32m
@@ -21,6 +25,62 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "$(YELLOW)%-25s$(NC) %s\n", $$1, $$2}'
 
 ##@ Setup & Prerequisites
+
+tf-init: ## Initialize Terraform for AWS foundation
+	terraform -chdir=$(TF_DIR) init
+
+tf-plan: ## Plan AWS foundation changes
+	terraform -chdir=$(TF_DIR) plan
+
+tf-apply: ## Apply AWS foundation changes
+	terraform -chdir=$(TF_DIR) apply
+
+tf-destroy: ## Destroy AWS foundation
+	terraform -chdir=$(TF_DIR) destroy
+
+bootstrap-kafka: ## Apply Terraform, update kubeconfig, install Strimzi, deploy and verify Kafka
+	@./infrastructure/terraform/bootstrap-kafka.sh
+
+eks-kubeconfig: ## Update kubeconfig from Terraform outputs
+	@./infrastructure/terraform/update-kubeconfig.sh
+
+apply-cloud-config: ## Create/update cloud config ConfigMap from Terraform outputs
+	@./infrastructure/k8s/overlays/eks/apply-cloud-config.sh
+
+install-alb-controller: ## Install AWS Load Balancer Controller on EKS
+	@./infrastructure/k8s/overlays/eks/install-alb-controller.sh
+
+deploy-milvus: ## Deploy Milvus standalone on EKS via Helm
+	@./infrastructure/k8s/overlays/eks/deploy-milvus.sh
+
+push-ecr-images: ## Build and push gateway, inference, event-consumer, and data-init images to ECR
+	@./infrastructure/k8s/overlays/eks/build-push-ecr.sh
+
+deploy-production: ## Apply production cloud app stack to EKS
+	@./infrastructure/k8s/overlays/eks/deploy-production.sh
+
+destroy-production: ## Safely tear down the production EKS stack and Terraform foundation
+	@./infrastructure/k8s/overlays/eks/destroy-production.sh --environment production $(DESTROY_ARGS)
+
+verify-deployment: ## Verify app stack, public endpoints, and realtime loop
+	@./infrastructure/k8s/overlays/eks/verify-deployment.sh
+
+eks-sync-ecr-images: ## Rewrite EKS overlay image URLs from Terraform outputs
+	@./infrastructure/k8s/overlays/eks/sync-ecr-images.sh
+
+kafka-install-strimzi: ## Install Strimzi operator on EKS
+	@./infrastructure/k8s/overlays/eks/kafka/install-strimzi.sh
+
+kafka-deploy: ## Deploy Kafka cluster and required topics on EKS
+	@./infrastructure/k8s/overlays/eks/kafka/deploy-kafka.sh
+
+kafka-status: ## Verify Strimzi and Kafka health
+	@./infrastructure/k8s/overlays/eks/kafka/verify-kafka.sh
+
+kafka-topic-verify: ## Verify scalestyle.clicks topic exists
+	@TOPIC_ONLY=1 ./infrastructure/k8s/overlays/eks/kafka/verify-kafka.sh
+
+kafka-smoke: kafka-install-strimzi kafka-deploy kafka-status ## Install, deploy, and verify Kafka on EKS
 
 k8s-setup: ## Setup K8s prerequisites (metrics-server, ingress-nginx)
 	@echo "$(GREEN)Installing K8s prerequisites...$(NC)"

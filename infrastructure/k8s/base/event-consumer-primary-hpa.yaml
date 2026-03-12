@@ -1,0 +1,68 @@
+---
+# Horizontal Pod Autoscaler for the primary click-event consumer.
+#
+# Why resource metrics instead of Kafka lag:
+# - The repo exposes consumer metrics over Prometheus scrape, but it does not
+#   include KEDA, prometheus-adapter, or any other bridge from Prometheus/Kafka
+#   lag into the Kubernetes custom/external metrics APIs.
+# - Standard HPA can therefore only use resource metrics reliably today.
+#
+# Operational intent:
+# - Keep at least 2 replicas for HA and safer Kafka rollouts.
+# - Allow scale-out up to 8 replicas, which is below the 12-partition topic
+#   ceiling while still giving meaningful parallelism.
+# - Use conservative stabilization to avoid rebalance thrash.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: event-consumer-primary-hpa
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: event-consumer-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: event-consumer-primary
+
+  minReplicas: 2
+  maxReplicas: 8
+
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Max
+
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 120
+      - type: Pods
+        value: 1
+        periodSeconds: 120
+      selectPolicy: Min

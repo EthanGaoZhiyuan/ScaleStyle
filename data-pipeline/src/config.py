@@ -46,6 +46,7 @@ MILVUS_COLLECTION = os.getenv("MILVUS_COLLECTION", "scale_style_bge_v2")
 # Redis configuration
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_TLS = os.getenv("REDIS_TLS", "false").lower() in ("1", "true", "yes")
 POPULARITY_KEY = os.getenv("POPULARITY_KEY", "global:popular")
 POPULARITY_TOPN = int(os.getenv("POPULARITY_TOPN", "200"))
 

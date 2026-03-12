@@ -1,0 +1,23 @@
+---
+# Persistent cache for Hugging Face / model artifacts used by the standard
+# inference Deployment.
+#
+# Base strategy:
+# - Use a PVC instead of emptyDir so pod restarts and rolling updates do not
+#   force full model re-downloads.
+# - Leave storageClassName unset in base so each environment can either rely on
+#   its default StorageClass or patch this claim explicitly in the overlay.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: inference-model-cache
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: inference-model-cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi

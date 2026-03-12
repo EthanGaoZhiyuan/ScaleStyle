@@ -116,15 +116,22 @@ class TestEventLoop:
         last_activity = redis_client.get(f"user:{test_user}:last_activity")
         assert last_activity is not None, "Last activity should be set"
 
-        # 3. item:*:clicks should be incremented
+        # 3. item:*:clicks should have a decayed score recorded
         item_clicks = redis_client.get(f"item:{test_item}:clicks")
         assert item_clicks is not None, "Item clicks should be recorded"
-        assert int(item_clicks) >= 1, "Item clicks should be >= 1"
+        assert float(item_clicks) >= 1.0, "Item click score should be >= 1.0"
 
-        # 4. global:popular should include the item
-        popular_score = redis_client.zscore("global:popular", test_item)
-        assert popular_score is not None, "Item should be in global:popular"
-        assert popular_score >= 1.0, "Popular score should be >= 1"
+        # 4. global:popular should include the item and keep a decayed actual score hash
+        popular_rank_score = redis_client.zscore("global:popular", test_item)
+        popular_actual_score = redis_client.hget("global:popular:score", test_item)
+        assert popular_rank_score is not None, "Item should be ranked in global:popular"
+        assert popular_actual_score is not None, "Item should have an actual popularity score"
+        assert float(popular_actual_score) >= 1.0, "Popularity score should be >= 1.0"
+
+        # 4b. Windowed popularity buckets should capture the click in real-time windows
+        assert redis_client.zscore("popularity:bucket:1h:1772879400", test_item) is not None
+        assert redis_client.zscore("popularity:bucket:24h:1772877600", test_item) is not None
+        assert redis_client.zscore("popularity:bucket:7d:1772841600", test_item) is not None
 
         # 5. Dedupe key should exist
         dedupe_key = f"dedupe:event:{event['event_id']}"
@@ -155,8 +162,8 @@ class TestEventLoop:
         time.sleep(3)
 
         # Record initial state
-        clicks_before = int(redis_client.get(f"item:{test_item}:clicks") or 0)
-        popular_score_before = redis_client.zscore("global:popular", test_item) or 0.0
+        clicks_before = float(redis_client.get(f"item:{test_item}:clicks") or 0.0)
+        popular_score_before = float(redis_client.hget("global:popular:score", test_item) or 0.0)
 
         print(f"✅ First send: clicks={clicks_before}, popular={popular_score_before}")
 
@@ -166,8 +173,8 @@ class TestEventLoop:
         time.sleep(3)
 
         # Verify counts did NOT increase
-        clicks_after = int(redis_client.get(f"item:{test_item}:clicks") or 0)
-        popular_score_after = redis_client.zscore("global:popular", test_item) or 0.0
+        clicks_after = float(redis_client.get(f"item:{test_item}:clicks") or 0.0)
+        popular_score_after = float(redis_client.hget("global:popular:score", test_item) or 0.0)
 
         print(
             f"✅ After duplicate: clicks={clicks_after}, popular={popular_score_after}"
@@ -200,10 +207,10 @@ class TestEventLoop:
         time.sleep(5)  # Wait for all 3 to process
 
         # Verify accumulated clicks
-        item_clicks = int(redis_client.get(f"item:{test_item}:clicks") or 0)
-        popular_score = redis_client.zscore("global:popular", test_item) or 0.0
+        item_clicks = float(redis_client.get(f"item:{test_item}:clicks") or 0.0)
+        popular_score = float(redis_client.hget("global:popular:score", test_item) or 0.0)
 
-        assert item_clicks >= 3, f"Should have at least 3 clicks, got {item_clicks}"
+        assert item_clicks >= 3.0, f"Should have decayed click score >= 3.0 for immediate clicks, got {item_clicks}"
         assert (
             popular_score >= 3.0
         ), f"Popular score should be >= 3, got {popular_score}"

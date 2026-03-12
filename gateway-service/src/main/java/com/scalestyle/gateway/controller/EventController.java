@@ -1,150 +1,113 @@
 package com.scalestyle.gateway.controller;
 
-import com.scalestyle.gateway.dto.ClickEvent;
+import com.scalestyle.gateway.dto.ClickEventResponse;
+import com.scalestyle.gateway.dto.TrackClickRequest;
 import com.scalestyle.gateway.exception.CommonApiResponse;
-import com.scalestyle.gateway.service.EventProducerService;
+import com.scalestyle.gateway.exception.EventTrackingUnavailableException;
+import com.scalestyle.gateway.service.EventTrackingAttemptMetrics;
+import com.scalestyle.gateway.service.EventTrackingService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.request.async.DeferredResult;
 
-import java.util.Map;
+import jakarta.validation.Valid;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
- * Event Controller for user interaction tracking
- * 
- * Week 2: Real-time behavior loop
- * Exposes POST /events/click for capturing user clicks
+ * User interaction event tracking endpoint.
+ * Captures click events only after Kafka broker acknowledgment.
+ *
+ * <h3>Validation layers</h3>
+ * <ul>
+ *   <li><b>Transport validation</b> ({@code @Valid}): schema constraints in {@link TrackClickRequest}.</li>
+ *   <li><b>Business validation</b> ({@link com.scalestyle.gateway.service.EventTrackingService}):
+ *       source normalization, device allowlist, broker-ack publish contract.
+ *       Failures: {@code 400} ({@code BusinessValidationException}) or {@code 503}
+ *       ({@code EventTrackingUnavailableException}).</li>
+ * </ul>
  */
 @RestController
-@RequestMapping("/api/events")
+@RequestMapping({"/api/events", "/events"})
 @RequiredArgsConstructor
 @Slf4j
 @Tag(name = "Events", description = "User interaction event tracking")
 public class EventController {
-    
-    private final EventProducerService eventProducerService;
-    
+
+    private final EventTrackingService eventTrackingService;
+    private final EventTrackingAttemptMetrics eventTrackingAttemptMetrics;
+    @Qualifier("eventProducerExecutor")
+    private final Executor eventProducerExecutor;
+    // Keep outer Spring timeout slightly above the internal broker-ack deadline (6s).
+    private static final long DEFERRED_TIMEOUT_MS = 6500L;
+
     /**
-     * POST /api/events/click
-     * 
-     * Capture user click event and publish to Kafka
-     * 
-     * Request body example:
-     * {
-     *   "user_id": "user_12345",
-     *   "item_id": "108775051",
-     *   "session_id": "sess_abc123",
-     *   "source": "search",
-     *   "query": "red dress",
-     *   "position": 2
-     * }
+    * Accepts a click event only after the broker acknowledges persistence.
+     *
+    * <p>The Tomcat request thread is released immediately after admission to the
+    * dedicated click-tracking executor. The Kafka broker-ack wait still happens,
+    * but it is isolated to that executor rather than consuming servlet threads.
+    * If the request exceeds {@value #DEFERRED_TIMEOUT_MS} ms, the endpoint returns
+    * {@code EventTrackingUnavailableException("Event tracking temporarily unavailable [request_timeout]")}.
+    *
+    * <p>Returns <b>HTTP 200 OK</b> only after Kafka acknowledges the publish.
+     *
+     * @param request validated click event payload
+     * @return 200 with body {@code { status: "acknowledged_by_broker",
+     *         event_id: "...", processing_mode: "broker_ack_sync" }}
      */
     @PostMapping("/click")
-    @Operation(summary = "Track user click event", description = "Publish click event to Kafka for real-time personalization")
-    public CommonApiResponse<Map<String, Object>> trackClick(@RequestBody ClickEvent event) {
-        log.info("Received click event: userId={}, itemId={}, source={}", 
-                event.getUserId(), event.getItemId(), event.getSource());
-        
-        // P0.2: Strengthen validation - validate required fields
-        if (event.getUserId() == null || event.getUserId().trim().isEmpty()) {
-            return CommonApiResponse.error(400, "Missing or empty required field: user_id");
-        }
-        
-        if (event.getItemId() == null || event.getItemId().trim().isEmpty()) {
-            return CommonApiResponse.error(400, "Missing or empty required field: item_id");
-        }
-        
-        if (event.getSessionId() == null || event.getSessionId().trim().isEmpty()) {
-            return CommonApiResponse.error(400, "Missing or empty required field: session_id");
-        }
-        
-        // P0.2: Validate source against allowlist
-        if (event.getSource() == null) {
-            event.setSource("unknown");
-        } else {
-            String source = event.getSource().toLowerCase();
-            if (!source.equals("search") && !source.equals("browse") && 
-                !source.equals("recommendation") && !source.equals("image_search") && 
-                !source.equals("unknown")) {
-                return CommonApiResponse.error(400, 
-                    "Invalid source. Must be one of: search, browse, recommendation, image_search");
-            }
-            event.setSource(source);
-        }
-        
-        // P0.2: Validate event_type if provided, or set default
-        if (event.getEventType() != null && !event.getEventType().equals("click")) {
-            return CommonApiResponse.error(400, "Invalid event_type. Only 'click' is supported");
-        }
-        if (event.getEventType() == null) {
-            event.setEventType("click");
-        }
-        
-        // P0.2: Validate query length if present
-        if (event.getQuery() != null && event.getQuery().length() > 500) {
-            return CommonApiResponse.error(400, "query field exceeds maximum length of 500 characters");
-        }
-        
-        // P0.2: Validate image_hash length if present
-        if (event.getImageHash() != null && event.getImageHash().length() > 128) {
-            return CommonApiResponse.error(400, "image_hash field exceeds maximum length of 128 characters");
-        }
-        
-        // P0.2: Validate timestamp if provided, or set to current time
-        if (event.getTimestamp() != null) {
-            try {
-                java.time.Instant.parse(event.getTimestamp());
-            } catch (java.time.format.DateTimeParseException e) {
-                return CommonApiResponse.error(400, "Invalid timestamp format. Must be ISO-8601");
-            }
-        } else {
-            event.setTimestamp(java.time.Instant.now().toString());
-        }
-        
-        // Set event_id if not provided
-        if (event.getEventId() == null) {
-            event.setEventId(java.util.UUID.randomUUID().toString());
-        }
-        
-        // P0.4: Validate device against allowlist
-        if (event.getDevice() == null) {
-            event.setDevice("api");
-        } else {
-            String device = event.getDevice().toLowerCase();
-            if (!device.equals("web") && !device.equals("mobile") && !device.equals("api")) {
-                return CommonApiResponse.error(400, 
-                    "Invalid device. Must be one of: web, mobile, api");
-            }
-            event.setDevice(device);
-        }
-        
-        // P0.4: Validate position if provided (non-negative)
-        if (event.getPosition() != null && event.getPosition() < 0) {
-            return CommonApiResponse.error(400, 
-                "Invalid position. Must be non-negative");
-        }
-        
-        // Publish to Kafka (async, non-blocking)
-        eventProducerService.publishClickEvent(event);
-        
-        return CommonApiResponse.success(Map.of(
-                "event_id", event.getEventId(),
-                "status", "accepted",
-                "message", "Click event published to Kafka"
+    @Operation(
+        summary = "Track user click event",
+        description = "Returns success only after Kafka broker acknowledgment."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Acknowledged by Kafka broker"),
+        @ApiResponse(responseCode = "400", description = "Validation failure"),
+        @ApiResponse(responseCode = "503", description = "Local executor saturated, Kafka publish unavailable, or broker ack timed out")
+    })
+    public DeferredResult<ResponseEntity<CommonApiResponse<ClickEventResponse>>> trackClick(
+            @Valid @RequestBody TrackClickRequest request) {
+        DeferredResult<ResponseEntity<CommonApiResponse<ClickEventResponse>>> deferredResult =
+                new DeferredResult<>(DEFERRED_TIMEOUT_MS);
+
+        deferredResult.onTimeout(() -> deferredResult.setErrorResult(
+            new EventTrackingUnavailableException("Event tracking temporarily unavailable [request_timeout]")
         ));
+        try {
+            eventProducerExecutor.execute(() -> processTrackClick(request, deferredResult));
+            eventTrackingAttemptMetrics.recordLocalProcessingAccepted();
+        } catch (RejectedExecutionException e) {
+            eventTrackingAttemptMetrics.recordLocalQueueRejected();
+            deferredResult.setErrorResult(new EventTrackingUnavailableException(
+                    "Event tracking temporarily unavailable [local_queue_rejected]", e));
+        }
+
+        return deferredResult;
     }
-    
-    /**
-     * Health check endpoint for event service
-     */
+
+    private void processTrackClick(
+            TrackClickRequest request,
+            DeferredResult<ResponseEntity<CommonApiResponse<ClickEventResponse>>> deferredResult) {
+        try {
+            ClickEventResponse response = eventTrackingService.trackClick(request);
+            deferredResult.setResult(ResponseEntity.status(HttpStatus.OK).body(CommonApiResponse.success(response)));
+        } catch (Exception e) {
+            deferredResult.setErrorResult(e);
+        }
+    }
+
     @GetMapping("/health")
     @Operation(summary = "Event service health check")
-    public CommonApiResponse<Map<String, String>> health() {
-        return CommonApiResponse.success(Map.of(
-                "status", "healthy",
-                "service", "event-streaming"
-        ));
+    public CommonApiResponse<String> health() {
+        return CommonApiResponse.success("healthy");
     }
 }

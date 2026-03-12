@@ -4,37 +4,55 @@ kind: Kustomization
 # EKS-specific configuration
 # Production-ready AWS deployment with ALB, EBS, and IRSA
 
-namePrefix: prod-
-
 # Base configuration
 resources:
   - ../../base
   - ingress-alb.yaml
   - storage-class-ebs.yaml
-  - service-account-irsa.yaml
-  - redis-pvc.yaml
-  - milvus-pvc.yaml
-  - raycluster.yaml  # Optional: Advanced Ray autoscaling
+  - storage-class-efs.yaml
 
 # EKS-specific patches
 patchesStrategicMerge:
+  - inference-model-cache-pvc.yaml
   - resource-limits-production.yaml
   - replicas-production.yaml
   - init-job-full.yaml  # Full init (load Milvus)
+  - delete-hpa.yaml
+  - delete-redis.yaml
+  - delete-ingress.yaml
+  - configmap-patch.yaml  # Disable generation to fit 4Gi memory limit
 
-# Use ECR images (or Docker Hub)
+# ECR image references.
+#
+# newName  — injected by sync-ecr-images.sh from Terraform outputs at deploy time.
+# newTag   — injected by sync-ecr-images.sh from the IMAGE_TAG env variable.
+#            IMAGE_TAG MUST be an immutable, content-addressed tag (e.g. "git-3f8c9ab").
+#            "latest" is NEVER a valid value here: it breaks rollback auditability and
+#            can silently produce divergent images across nodes with imagePullPolicy:
+#            IfNotPresent.
+#
+# To build and push: IMAGE_TAG=git-$(git rev-parse --short HEAD) ./build-push-ecr.sh
+# To deploy:        IMAGE_TAG=git-$(git rev-parse --short HEAD) ./deploy-production.sh
 images:
   - name: scalestyle-gateway
-    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/scalestyle-gateway
-    newTag: latest
+    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/gateway-service
+    newTag: "git-COMMIT_SHA"
   - name: scalestyle-inference
-    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/scalestyle-inference
-    newTag: latest
+    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/inference-service
+    newTag: "git-COMMIT_SHA"
   - name: scalestyle-data-init
-    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/scalestyle-data-init
-    newTag: latest
+    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/data-init
+    newTag: "git-COMMIT_SHA"
+  - name: scalestyle-event-consumer
+    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/event-consumer
+    newTag: "git-COMMIT_SHA"
 
-# Change gateway service to LoadBalancer (ALB will be created)
+# EKS-specific config overrides.
+# Cloud endpoints (Redis, Kafka, S3 …) are injected at deploy time by
+# apply-cloud-config.sh into the scalestyle-cloud-config ConfigMap, which is
+# mounted AFTER scalestyle-config in every pod's envFrom — its values win on
+# conflict.  Keep this patch and apply-cloud-config.sh in sync on any key that
+# both touch.
 patches:
   - target:
       kind: ConfigMap
@@ -43,28 +61,28 @@ patches:
       - op: add
         path: /data/ENVIRONMENT
         value: eks-production
+
+      # Tracing: enabled via the Jaeger all-in-one collector that is deployed
+      # from the base manifest (jaeger.yaml).  The OTLP endpoint resolves to
+      # jaeger-collector:4317 (ClusterIP in the scalestyle namespace), which is
+      # the value already set in the base configmap.
+      #
+      # NOTE: Jaeger all-in-one uses in-memory trace storage — spans are lost on
+      # pod restart.  For persistent traces, replace the base Jaeger deployment
+      # with an OTel Collector → AWS X-Ray / Elastic APM / Tempo backend and
+      # update OTEL_EXPORTER_OTLP_ENDPOINT in apply-cloud-config.sh accordingly.
       - op: replace
-        path: /data/REDIS_HOST
-        value: redis.scalestyle.svc.cluster.local
+        path: /data/OTEL_TRACES_EXPORTER
+        value: otlp
+
+      # Metrics: collected by Prometheus scrape (prometheus.io/scrape annotations
+      # on pods).  No OTLP push needed.
       - op: replace
-        path: /data/MILVUS_HOST
-        value: milvus.scalestyle.svc.cluster.local
+        path: /data/OTEL_METRICS_EXPORTER
+        value: none
+
+      # Logs: written to stdout and collected by the node-level log agent
+      # (e.g. Fluent Bit → CloudWatch Logs).  No OTLP push needed.
       - op: replace
-        path: /data/INFERENCE_BASE_URL
-        value: http://inference.scalestyle.svc.cluster.local:8000
-      - op: add
-        path: /data/AWS_REGION
-        value: ap-southeast-2
-  - target:
-      kind: Service
-      name: gateway
-    patch: |-
-      - op: replace
-        path: /spec/type
-        value: LoadBalancer
-      - op: add
-        path: /metadata/annotations
-        value:
-          service.beta.kubernetes.io/aws-load-balancer-type: "external"
-          service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
-          service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+        path: /data/OTEL_LOGS_EXPORTER
+        value: none

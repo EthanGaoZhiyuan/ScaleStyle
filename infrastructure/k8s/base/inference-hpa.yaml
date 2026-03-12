@@ -1,0 +1,69 @@
+---
+# Horizontal Pod Autoscaler for Inference Service
+# Automatically scales inference pods based on CPU utilization and memory
+#
+# Current metrics: CPU and memory (no external adapter required)
+# Optional enhancement: Add custom Prometheus metrics via prometheus-adapter
+#   Example: recommendation_phase_duration_seconds_p99 with 200ms threshold
+#   Requires: prometheus-adapter installed with custom metric configuration
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: inference-hpa
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: inference-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: inference
+  
+  # Scaling boundaries - aligned with Ray Serve autoscaling
+  # minReplicas: 2 ensures HA and eliminates SPOF cold-start risk
+  # With PDB minAvailable: 1, at least 1 pod survives voluntary disruptions
+  minReplicas: 2
+  maxReplicas: 8
+  
+  # Metrics for scaling decisions
+  metrics:
+  # CPU-based scaling (primary metric for ML workloads)
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50  # Scale when avg CPU > 50%
+  
+  # Memory-based scaling (secondary metric)
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 70  # Scale when avg memory > 70%
+  
+  # Scaling behavior
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60  # Wait 60s before scaling up (ML models take time to warm up)
+      policies:
+      - type: Percent
+        value: 100  # Double capacity on spike
+        periodSeconds: 60
+      - type: Pods
+        value: 2  # Or add 2 pods at a time
+        periodSeconds: 60
+      selectPolicy: Max  # Use the policy that adds most pods
+    
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Wait 5min before scaling down (avoid thrashing)
+      policies:
+      - type: Percent
+        value: 50  # Remove 50% of current replicas
+        periodSeconds: 120
+      - type: Pods
+        value: 1  # Or remove 1 pod at a time
+        periodSeconds: 120
+      selectPolicy: Min  # Use the policy that removes fewest pods

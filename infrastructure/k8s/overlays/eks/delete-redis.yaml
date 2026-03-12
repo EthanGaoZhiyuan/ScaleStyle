@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: scalestyle
+$patch: delete
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: scalestyle
+$patch: delete
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: scalestyle
+$patch: delete

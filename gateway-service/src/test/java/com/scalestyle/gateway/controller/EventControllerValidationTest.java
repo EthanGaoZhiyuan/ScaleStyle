@@ -1,280 +1,175 @@
 package com.scalestyle.gateway.controller;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
-
-import com.scalestyle.gateway.dto.ClickEvent;
+import com.scalestyle.gateway.dto.ClickEventResponse;
+import com.scalestyle.gateway.dto.TrackClickRequest;
 import com.scalestyle.gateway.exception.CommonApiResponse;
-import com.scalestyle.gateway.service.EventProducerService;
+import com.scalestyle.gateway.exception.EventTrackingUnavailableException;
+import com.scalestyle.gateway.service.EventTrackingAttemptMetrics;
+import com.scalestyle.gateway.service.EventTrackingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.context.request.async.DeferredResult;
 
-import java.util.Map;
+import java.lang.reflect.Field;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
- * Test EventController boundary validation
- * Week 2 - P0 hardening: Device, position, source, event_type validation
+ * Controller tests after contract-boundary refactor.
+ *
+ * Controller responsibilities are intentionally narrow:
+ * - Deserialize request body
+ * - Delegate to service layer
+ * - Return HTTP 200 wrapper after Kafka broker acknowledgment
+ *
+ * Validation and error mapping happen in service + global exception handler.
  */
 @ExtendWith(MockitoExtension.class)
 class EventControllerValidationTest {
-    
+
     @Mock
-    private EventProducerService eventProducerService;
-    
-    @InjectMocks
+    private EventTrackingService eventTrackingService;
+
+    @Mock
+    private EventTrackingAttemptMetrics eventTrackingAttemptMetrics;
+
     private EventController eventController;
-    
-    private ClickEvent validEvent;
-    
+    private Executor directExecutor;
+
+    private TrackClickRequest validRequest;
+
     @BeforeEach
     void setUp() {
-        validEvent = ClickEvent.builder()
+        directExecutor = Runnable::run;
+        eventController = new EventController(eventTrackingService, eventTrackingAttemptMetrics, directExecutor);
+
+        validRequest = TrackClickRequest.builder()
                 .userId("user_12345")
                 .itemId("108775051")
                 .sessionId("sess_abc123")
                 .source("search")
                 .query("red dress")
                 .position(2)
+                .device("web")
                 .build();
     }
-    
+
     @Test
-    void testValidEventAccepted() {
-        // Act
-        CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-        
-        // Assert
+    void trackClick_shouldReturn200_withBrokerAckContract_whenServiceSucceeds() {
+        ClickEventResponse serviceResponse = ClickEventResponse.builder()
+                .eventId("evt_1")
+                .status("acknowledged_by_broker")
+                .message("Click event acknowledged by Kafka broker.")
+                .processingMode("broker_ack_sync")
+                .build();
+        when(eventTrackingService.trackClick(any(TrackClickRequest.class))).thenReturn(serviceResponse);
+
+        DeferredResult<ResponseEntity<CommonApiResponse<ClickEventResponse>>> deferredResult =
+            eventController.trackClick(validRequest);
+
+        assertTrue(deferredResult.hasResult());
+        @SuppressWarnings("unchecked")
+        ResponseEntity<CommonApiResponse<ClickEventResponse>> entity =
+            (ResponseEntity<CommonApiResponse<ClickEventResponse>>) deferredResult.getResult();
+
+        assertEquals(HttpStatus.OK, entity.getStatusCode());
+        CommonApiResponse<ClickEventResponse> body = entity.getBody();
+        assertNotNull(body);
+        assertEquals(200, body.getCode());
+        assertSame(serviceResponse, body.getData());
+        assertEquals("acknowledged_by_broker", body.getData().getStatus());
+        assertEquals("broker_ack_sync", body.getData().getProcessingMode());
+
+        verify(eventTrackingService).trackClick(validRequest);
+        verify(eventTrackingAttemptMetrics).recordLocalProcessingAccepted();
+    }
+
+    @Test
+    void trackClick_shouldExposeAsyncError_forGlobalHandler() {
+        IllegalArgumentException exception = new IllegalArgumentException("Missing required field: source");
+        when(eventTrackingService.trackClick(any(TrackClickRequest.class))).thenThrow(exception);
+
+        DeferredResult<ResponseEntity<CommonApiResponse<ClickEventResponse>>> deferredResult =
+            eventController.trackClick(validRequest);
+
+        assertTrue(deferredResult.hasResult());
+        assertSame(exception, deferredResult.getResult());
+        verify(eventTrackingService).trackClick(validRequest);
+        verify(eventTrackingAttemptMetrics).recordLocalProcessingAccepted();
+    }
+
+    @Test
+    void trackClick_shouldConfigureControllerTimeout_andSurfaceUnavailableOnTimeout() throws Exception {
+        Executor blockingExecutor = command -> {
+        };
+        eventController = new EventController(eventTrackingService, eventTrackingAttemptMetrics, blockingExecutor);
+
+        DeferredResult<ResponseEntity<CommonApiResponse<ClickEventResponse>>> deferredResult =
+                eventController.trackClick(validRequest);
+
+        assertEquals(6500L, getTimeoutValue(deferredResult));
+        assertNull(deferredResult.getResult());
+
+        getTimeoutCallback(deferredResult).run();
+
+        assertTrue(deferredResult.hasResult());
+        EventTrackingUnavailableException error =
+                assertInstanceOf(EventTrackingUnavailableException.class, deferredResult.getResult());
+        assertEquals("Event tracking temporarily unavailable [request_timeout]", error.getMessage());
+        verify(eventTrackingAttemptMetrics).recordLocalProcessingAccepted();
+        verify(eventTrackingService, never()).trackClick(any());
+    }
+
+    @Test
+    void trackClick_shouldRejectWhenLocalExecutorIsSaturated() {
+        Executor rejectingExecutor = command -> {
+            throw new RejectedExecutionException("queue full");
+        };
+        eventController = new EventController(eventTrackingService, eventTrackingAttemptMetrics, rejectingExecutor);
+
+        DeferredResult<ResponseEntity<CommonApiResponse<ClickEventResponse>>> deferredResult =
+            eventController.trackClick(validRequest);
+
+        assertTrue(deferredResult.hasResult());
+        EventTrackingUnavailableException error =
+            assertInstanceOf(EventTrackingUnavailableException.class, deferredResult.getResult());
+        assertEquals("Event tracking temporarily unavailable [local_queue_rejected]", error.getMessage());
+        verify(eventTrackingAttemptMetrics).recordLocalQueueRejected();
+        verify(eventTrackingService, never()).trackClick(any());
+    }
+
+    @Test
+    void health_shouldReturnHealthy() {
+        CommonApiResponse<String> response = eventController.health();
         assertEquals(200, response.getCode());
-        assertEquals("accepted", response.getData().get("status"));
-        verify(eventProducerService, times(1)).publishClickEvent(any(ClickEvent.class));
+        assertEquals("healthy", response.getData());
     }
-    
-    @Test
-    void testMissingUserIdRejected() {
-        // Arrange
-        validEvent.setUserId(null);
-        
-        // Act
-        CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-        
-        // Assert
-        assertEquals(400, response.getCode());
-        assertTrue(response.getMessage().contains("user_id"));
-        verify(eventProducerService, never()).publishClickEvent(any());
+
+    private Runnable getTimeoutCallback(DeferredResult<?> deferredResult) throws Exception {
+        Field timeoutCallbackField = DeferredResult.class.getDeclaredField("timeoutCallback");
+        timeoutCallbackField.setAccessible(true);
+        return (Runnable) timeoutCallbackField.get(deferredResult);
     }
-    
-    @Test
-    void testEmptyUserIdRejected() {
-        // Arrange
-        validEvent.setUserId("  ");
-        
-        // Act
-        CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-        
-        // Assert
-        assertEquals(400, response.getCode());
-        assertTrue(response.getMessage().contains("user_id"));
-        verify(eventProducerService, never()).publishClickEvent(any());
-    }
-    
-    @Test
-    void testMissingItemIdRejected() {
-        // Arrange
-        validEvent.setItemId(null);
-        
-        // Act
-        CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-        
-        // Assert
-        assertEquals(400, response.getCode());
-        assertTrue(response.getMessage().contains("item_id"));
-        verify(eventProducerService, never()).publishClickEvent(any());
-    }
-    
-    @Test
-    void testMissingSessionIdRejected() {
-        // Arrange
-        validEvent.setSessionId(null);
-        
-        // Act
-        CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-        
-        // Assert
-        assertEquals(400, response.getCode());
-        assertTrue(response.getMessage().contains("session_id"));
-        verify(eventProducerService, never()).publishClickEvent(any());
-    }
-    
-    @Test
-    void testInvalidSourceRejected() {
-        // Arrange
-        validEvent.setSource("invalid_source");
-        
-        // Act
-        CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-        
-        // Assert
-        assertEquals(400, response.getCode());
-        assertTrue(response.getMessage().contains("source"));
-        verify(eventProducerService, never()).publishClickEvent(any());
-    }
-    
-    @Test
-    void testValidSourcesAccepted() {
-        String[] validSources = {"search", "browse", "recommendation", "image_search"};
-        
-        for (String source : validSources) {
-            validEvent.setSource(source);
-            CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-            assertEquals(200, response.getCode(), "Source '" + source + "' should be accepted");
-        }
-        
-        verify(eventProducerService, times(validSources.length)).publishClickEvent(any());
-    }
-    
-    @Test
-    void testInvalidEventTypeRejected() {
-        // Arrange
-        validEvent.setEventType("purchase");
-        
-        // Act
-        CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-        
-        // Assert
-        assertEquals(400, response.getCode());
-        assertTrue(response.getMessage().contains("event_type"));
-        verify(eventProducerService, never()).publishClickEvent(any());
-    }
-    
-    @Test
-    void testQueryTooLongRejected() {
-        // Arrange - create query > 500 chars
-        String longQuery = "a".repeat(501);
-        validEvent.setQuery(longQuery);
-        
-        // Act
-        CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-        
-        // Assert
-        assertEquals(400, response.getCode());
-        assertTrue(response.getMessage().contains("query"));
-        assertTrue(response.getMessage().contains("500"));
-        verify(eventProducerService, never()).publishClickEvent(any());
-    }
-    
-    @Test
-    void testImageHashTooLongRejected() {
-        // Arrange - create image_hash > 128 chars
-        String longHash = "x".repeat(129);
-        validEvent.setImageHash(longHash);
-        
-        // Act
-        CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-        
-        // Assert
-        assertEquals(400, response.getCode());
-        assertTrue(response.getMessage().contains("image_hash"));
-        assertTrue(response.getMessage().contains("128"));
-        verify(eventProducerService, never()).publishClickEvent(any());
-    }
-    
-    @Test
-    void testInvalidTimestampRejected() {
-        // Arrange
-        validEvent.setTimestamp("not-a-timestamp");
-        
-        // Act
-        CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-        
-        // Assert
-        assertEquals(400, response.getCode());
-        assertTrue(response.getMessage().contains("timestamp"));
-        verify(eventProducerService, never()).publishClickEvent(any());
-    }
-    
-    @Test
-    void testValidTimestampAccepted() {
-        // Arrange
-        validEvent.setTimestamp("2026-03-07T10:30:45.123Z");
-        
-        // Act
-        CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-        
-        // Assert
-        assertEquals(200, response.getCode());
-        verify(eventProducerService, times(1)).publishClickEvent(any());
-    }
-    
-    @Test
-    void testMissingTimestampAutoFilled() {
-        // Arrange
-        validEvent.setTimestamp(null);
-        
-        // Act
-        CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-        
-        // Assert
-        assertEquals(200, response.getCode());
-        assertNotNull(validEvent.getTimestamp());
-        verify(eventProducerService, times(1)).publishClickEvent(any());
-    }
-    
-    @Test
-    void testInvalidDeviceRejected() {
-        // Arrange
-        validEvent.setDevice("xbox");  // Invalid device
-        
-        // Act
-        CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-        
-        // Assert
-        assertEquals(400, response.getCode());
-        assertTrue(response.getMessage().contains("device"));
-        verify(eventProducerService, never()).publishClickEvent(any());
-    }
-    
-    @Test
-    void testValidDevicesAccepted() {
-        String[] validDevices = {"web", "mobile", "api", "WEB", "Mobile", "API"};
-        
-        for (String device : validDevices) {
-            validEvent.setDevice(device);
-            CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-            assertEquals(200, response.getCode(), "Device '" + device + "' should be accepted");
-        }
-        
-        verify(eventProducerService, times(validDevices.length)).publishClickEvent(any());
-    }
-    
-    @Test
-    void testNegativePositionRejected() {
-        // Arrange
-        validEvent.setPosition(-1);  // Negative position
-        
-        // Act
-        CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-        
-        // Assert
-        assertEquals(400, response.getCode());
-        assertTrue(response.getMessage().contains("position"));
-        verify(eventProducerService, never()).publishClickEvent(any());
-    }
-    
-    @Test
-    void testZeroPositionAccepted() {
-        // Arrange - position=0 is valid (0-indexed)
-        validEvent.setPosition(0);
-        
-        // Act
-        CommonApiResponse<Map<String, Object>> response = eventController.trackClick(validEvent);
-        
-        // Assert
-        assertEquals(200, response.getCode());
-        verify(eventProducerService, times(1)).publishClickEvent(any());
+
+    private Long getTimeoutValue(DeferredResult<?> deferredResult) throws Exception {
+        Field timeoutValueField = DeferredResult.class.getDeclaredField("timeoutValue");
+        timeoutValueField.setAccessible(true);
+        return (Long) timeoutValueField.get(deferredResult);
     }
 }

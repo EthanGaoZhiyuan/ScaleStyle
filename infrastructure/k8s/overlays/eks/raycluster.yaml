@@ -1,6 +1,6 @@
 ---
 # RayCluster: Advanced Ray autoscaling with KubeRay Operator
-# This is an OPTIONAL advanced configuration for Week 4
+# Optional advanced configuration for Ray autoscaling
 # Provides better Ray-native autoscaling than standard K8s HPA
 
 apiVersion: ray.io/v1
@@ -50,8 +50,8 @@ spec:
       spec:
         containers:
         - name: ray-head
-          image: your-dockerhub-username/scalestyle-inference:latest
-          imagePullPolicy: Always
+          image: scalestyle-inference:__MUST_BE_OVERRIDDEN_BY_KUSTOMIZE__
+          imagePullPolicy: IfNotPresent
           
           ports:
           - containerPort: 6379
@@ -77,15 +77,10 @@ spec:
               cpu: "500m"
               memory: "1Gi"
           
-          # Volume mounts
-          volumeMounts:
-          - name: hf-cache
-            mountPath: /tmp/huggingface
-        
-        volumes:
-        - name: hf-cache
-          emptyDir:
-            sizeLimit: 10Gi
+          # Production cache strategy for autoscaled Ray pods:
+          # model artifacts must be pre-baked into the inference image.
+          # A per-pod emptyDir is not operationally safe for large model loads,
+          # and a single RWO PVC cannot be shared across autoscaled workers.
   
   # Worker node configuration (autoscaled)
   workerGroupSpecs:
@@ -106,8 +101,8 @@ spec:
       spec:
         containers:
         - name: ray-worker
-          image: your-dockerhub-username/scalestyle-inference:latest
-          imagePullPolicy: Always
+          image: scalestyle-inference:__MUST_BE_OVERRIDDEN_BY_KUSTOMIZE__
+          imagePullPolicy: IfNotPresent
           
           # Environment variables
           envFrom:
@@ -123,15 +118,8 @@ spec:
               cpu: "500m"
               memory: "1Gi"
           
-          # Volume mounts
-          volumeMounts:
-          - name: hf-cache
-            mountPath: /tmp/huggingface
-        
-        volumes:
-        - name: hf-cache
-          emptyDir:
-            sizeLimit: 10Gi
+          # Production cache strategy for autoscaled Ray pods:
+          # model artifacts must be pre-baked into the inference image.
 
 ---
 # RayService: Exposes Ray Serve deployments
@@ -159,7 +147,7 @@ spec:
         spec:
           containers:
           - name: ray-head
-            image: your-dockerhub-username/scalestyle-inference:latest
+            image: scalestyle-inference:__MUST_BE_OVERRIDDEN_BY_KUSTOMIZE__
             resources:
               limits:
                 cpu: "2"
@@ -178,7 +166,7 @@ spec:
         spec:
           containers:
           - name: ray-worker
-            image: your-dockerhub-username/scalestyle-inference:latest
+            image: scalestyle-inference:__MUST_BE_OVERRIDDEN_BY_KUSTOMIZE__
             resources:
               limits:
                 cpu: "2"
@@ -201,6 +189,7 @@ spec:
         env_vars:
           PYTHONPATH: "/app"
           HF_HOME: "/cache/huggingface"
+          TRANSFORMERS_CACHE: "/cache/huggingface/hub"
       deployments:
       - name: IngressDeployment
       - name: EmbeddingDeployment

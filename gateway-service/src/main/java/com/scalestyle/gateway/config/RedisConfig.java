@@ -16,14 +16,16 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 public class RedisConfig {
 
     /**
-     * StringRedisTemplate for accessing popular items (global:popular ZSET).
-     * Reused across fallback calls to avoid repeated instantiation.
+     * String-based template for popular items and fallback data access.
      */
     @Bean
     public StringRedisTemplate stringRedisTemplate(RedisConnectionFactory connectionFactory) {
         return new StringRedisTemplate(connectionFactory);
     }
 
+    /**
+     * Typed template for product metadata cache with JSON serialization.
+     */
     @Bean
     public RedisTemplate<String, RecommendationDTO> productRedisTemplate(RedisConnectionFactory connectionFactory) {
         RedisTemplate<String, RecommendationDTO> template = new RedisTemplate<>();
@@ -49,15 +51,13 @@ public class RedisConfig {
     }
     
     /**
-     * Fix: ObjectMapper bean for manual JSON serialization of List<RecommendationDTO>.
-     * This approach avoids Jackson's default typing issues with generic collections.
-     * Used by RecommendationService to serialize/deserialize cache values as JSON strings.
+     * ObjectMapper for recommendation cache serialization.
+     * Handles generic collections via explicit TypeReference bindings.
      */
     @Bean
     public ObjectMapper recommendationCacheObjectMapper() {
         ObjectMapper mapper = new ObjectMapper();
         mapper.registerModule(new JavaTimeModule());
-        // No default typing needed - explicit TypeReference handles generic types safely
         return mapper;
     }
 }

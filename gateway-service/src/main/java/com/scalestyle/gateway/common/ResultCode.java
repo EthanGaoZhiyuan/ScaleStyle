@@ -8,6 +8,7 @@ import lombok.Getter;
 public enum ResultCode {
     // --- Success ---
     SUCCESS(200, "Success"),
+    ACCEPTED(202, "Accepted"),
 
     // --- Client Errors (4xx) ---
     BAD_REQUEST(400, "Bad Request"),

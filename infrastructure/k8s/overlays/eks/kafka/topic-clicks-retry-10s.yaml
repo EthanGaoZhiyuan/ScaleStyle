@@ -1,0 +1,15 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: scalestyle-clicks-retry-10s
+  namespace: kafka-system
+  labels:
+    strimzi.io/cluster: scalestyle-kafka
+spec:
+  topicName: scalestyle.clicks.retry.10s
+  partitions: 12
+  replicas: 3
+  config:
+    min.insync.replicas: 2
+    retention.ms: 604800000
+    segment.bytes: 1073741824

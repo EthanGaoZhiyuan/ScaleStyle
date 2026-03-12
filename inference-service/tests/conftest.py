@@ -8,6 +8,8 @@ def mock_serve_deployment(*args, **kwargs):
     """Mock @serve.deployment decorator, returns original class with bind method added"""
 
     def decorator(cls):
+        cls._serve_deployment_options = dict(kwargs)
+
         # Add bind class method that returns a Mock object (simulates bound deployment)
         @classmethod
         def bind_method(c, *a, **kw):
@@ -19,6 +21,7 @@ def mock_serve_deployment(*args, **kwargs):
     if len(args) == 1 and callable(args[0]):
         # @serve.deployment (no parameters)
         cls = args[0]
+        cls._serve_deployment_options = {}
 
         @classmethod
         def bind_method(c, *a, **kw):
@@ -54,6 +57,10 @@ sys.modules["ray.serve.handle"] = ray_serve_handle_mock
 # Make ray.serve accessible to handle
 ray_mock.serve = ray_serve_mock
 ray_serve_mock.handle = ray_serve_handle_mock
+
+# Mock opentelemetry instrumentation (used by ingress; avoids missing optional dep in tests)
+sys.modules["opentelemetry.instrumentation"] = MagicMock()
+sys.modules["opentelemetry.instrumentation.fastapi"] = MagicMock()
 
 
 @pytest.fixture(autouse=True)

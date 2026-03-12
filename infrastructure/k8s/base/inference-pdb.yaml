@@ -1,0 +1,23 @@
+---
+# PodDisruptionBudget for Inference Service
+# Ensures HA during voluntary disruptions (node drain, cluster upgrades, etc.)
+#
+# With minReplicas: 2 from HPA and minAvailable: 1 from PDB:
+# - K8s will never drain more than 1 inference pod at a time
+# - At least 1 pod always serves traffic during rolling updates
+# - Protects against the SPOF cold-start scenario where all pods restart simultaneously
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: inference-pdb
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: inference-pdb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: scalestyle
+      component: inference
+  unhealthyPodEvictionPolicy: AlwaysAllow

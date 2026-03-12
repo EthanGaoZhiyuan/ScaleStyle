@@ -33,6 +33,7 @@ ext {
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
@@ -51,6 +52,7 @@ dependencies {
     
     // Resilience4j for circuit breaker and timeout handling
     implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.2.0'
+    implementation 'io.github.resilience4j:resilience4j-reactor:2.2.0'
     implementation 'io.github.resilience4j:resilience4j-micrometer:2.2.0'
     implementation 'org.springframework.boot:spring-boot-starter-aop'
     
@@ -72,6 +74,9 @@ dependencies {
     
     // Kafka for event streaming (Week 2: Real-time behavior loop)
     implementation 'org.springframework.kafka:spring-kafka'
+    
+    // WebFlux for true async HTTP client
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
 }
 
 protobuf {

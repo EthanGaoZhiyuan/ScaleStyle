@@ -10,16 +10,15 @@ metadata:
 spec:
   template:
     spec:
-      serviceAccountName: scalestyle-sa  # Use IRSA
       containers:
       - name: gateway
         resources:
           requests:
-            cpu: "500m"      # Enough for HPA to trigger
-            memory: "1Gi"
+            cpu: "250m"
+            memory: "512Mi"
           limits:
-            cpu: "2"         # Allow bursting
-            memory: "2Gi"
+            cpu: "1"
+            memory: "1Gi"
 
 ---
 apiVersion: apps/v1
@@ -28,37 +27,57 @@ metadata:
   name: inference
   namespace: scalestyle
 spec:
-  replicas: 2  # HA: 2 replicas for chaos testing
   template:
     spec:
-      serviceAccountName: scalestyle-sa  # Use IRSA
       containers:
       - name: inference
+        # INFRA-01 CPU budget after removing the EKS inference HPA:
+        # router 0.05 + ingress 1-3 x 0.25 + embedding 0.5 + retrieval 0.25
+        # + popularity 0.05 + reranker 0.25 + generation 0.05 + optional vision 0.1
+        # = 1.5 vCPU minimum and 2.0 vCPU max declared Ray footprint per pod.
         resources:
-          # Production: Higher resources for better performance
-          # Ray needs: ~3.55 CPU for deployments + 2 CPU overhead
           requests:
-            cpu: "6"         # Sufficient for Ray + overhead
-            memory: "10Gi"   # Models + concurrent requests
+            cpu: "1000m"
+            memory: "5Gi"
           limits:
-            cpu: "10"        # Allow bursting for c=50 load
-            memory: "16Gi"   # Prevent OOM under stress
+            cpu: "2"
+            memory: "8Gi"  # memory_limit >= RAY_MEMORY_GB + RAY_OBJECT_STORE_GB + model_weights + 1GB_overhead
+                             # = 5.0 + 1.0 + 1.3 (BGE) + 0.09 (reranker) + ~0.5 (runtime) ≈ 7.9 GB
 
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: redis
+  name: event-consumer-primary
   namespace: scalestyle
 spec:
   template:
     spec:
       containers:
-      - name: redis
+      - name: event-consumer
         resources:
           requests:
-            cpu: "500m"
-            memory: "2Gi"
+            cpu: "200m"
+            memory: "384Mi"
           limits:
-            cpu: "1"
-            memory: "4Gi"
+            cpu: "1000m"
+            memory: "768Mi"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-consumer-retry
+  namespace: scalestyle
+spec:
+  template:
+    spec:
+      containers:
+      - name: event-consumer-retry
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "128Mi"
+          limits:
+            cpu: "250m"
+            memory: "256Mi"

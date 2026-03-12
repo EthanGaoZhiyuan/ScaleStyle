@@ -9,6 +9,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: gateway
+  namespace: scalestyle
 spec:
   template:
     spec:
@@ -27,6 +28,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: inference
+  namespace: scalestyle
 spec:
   replicas: 1  # Local: single replica is fine
   template:

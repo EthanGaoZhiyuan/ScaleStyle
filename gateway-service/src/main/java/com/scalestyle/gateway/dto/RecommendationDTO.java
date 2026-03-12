@@ -19,8 +19,8 @@ public class RecommendationDTO {
     
     // Metadata for resilience monitoring
     private String source;           // "ray", "redis-cache", "popular-fallback"
-    private boolean degraded;        // true if fallback was used
-    private String degradedReason;   // Exception type that triggered fallback
+    private boolean degraded;        // true if a degraded/partial-success path was used
+    private String degradedReason;   // Stable enum vocabulary (e.g. CACHE_MISS, STALE_DATA_ALLOWED)
     
     // Week 3: AI recommendation reason (Top-1 only)
     private String reason;           // AI-generated reason (1 sentence), empty if fallback or not Top-1

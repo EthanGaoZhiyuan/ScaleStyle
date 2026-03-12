@@ -29,10 +29,14 @@ spec:
     spec:
       containers:
       - name: gateway
-        # Image will be replaced by Kustomize overlay
-        image: scalestyle-gateway:latest
-        imagePullPolicy: Always
-        
+        # Image will be replaced by Kustomize overlay (kustomization.yaml images[]).
+        # IfNotPresent is correct here ONLY because the EKS overlay always injects an
+        # immutable content-addressed tag (e.g. "git-3f8c9ab") via sync-ecr-images.sh.
+        # Never set newTag:latest in any overlay — it violates this contract and causes
+        # silent image divergence across nodes with IfNotPresent.
+        image: scalestyle-gateway:__MUST_BE_OVERRIDDEN_BY_KUSTOMIZE__
+        imagePullPolicy: IfNotPresent
+
         ports:
         - name: http
           containerPort: 8080
@@ -42,6 +46,9 @@ spec:
         envFrom:
         - configMapRef:
             name: scalestyle-config
+        - configMapRef:
+            name: scalestyle-cloud-config
+            optional: true
         
         # Additional environment variables specific to gateway
         env:
@@ -49,6 +56,22 @@ spec:
           value: "kubernetes"
         - name: SERVER_PORT
           value: "8080"
+        - name: KAFKA_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: gateway-kafka-auth
+              key: KAFKA_USERNAME
+        - name: KAFKA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: gateway-kafka-auth
+              key: KAFKA_PASSWORD
+        - name: KAFKA_SSL_CA_PATH
+          value: "/etc/kafka/secrets/ca.crt"
+        volumeMounts:
+        - name: kafka-cluster-ca
+          mountPath: /etc/kafka/secrets
+          readOnly: true
         
         # Resource requests and limits
         resources:
@@ -102,6 +125,10 @@ spec:
               - sh
               - -c
               - sleep 10
+      volumes:
+      - name: kafka-cluster-ca
+        secret:
+          secretName: kafka-cluster-ca
 
 ---
 # Gateway Service: ClusterIP for internal access (Ingress will route to this)
@@ -123,7 +150,4 @@ spec:
     port: 8080
     targetPort: 8080
     protocol: TCP
-  sessionAffinity: ClientIP  # Sticky sessions for better user experience
-  sessionAffinityConfig:
-    clientIP:
-      timeoutSeconds: 10800  # 3 hours
+  sessionAffinity: None

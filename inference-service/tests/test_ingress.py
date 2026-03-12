@@ -39,10 +39,10 @@ async def test_empty_candidates_fallback_popularity(monkeypatch):
             return P()
 
     monkeypatch.setattr(
-        "src.ray_serve.deployments.ingress._redis_client", lambda: DummyRedis()
+        "src.deployments.ingress._redis_client", lambda: DummyRedis()
     )
 
-    from src.ray_serve.deployments.ingress import IngressDeployment, SearchRequest
+    from src.deployments.ingress import IngressDeployment, SearchRequest
 
     # Set up fake handles - router must accept (query, user_id) to match ingress call
     router = FakeHandle(
@@ -104,10 +104,10 @@ async def test_redis_timeout_graceful_degradation(monkeypatch):
             raise TimeoutError("Redis connection timeout")
 
     monkeypatch.setattr(
-        "src.ray_serve.deployments.ingress._redis_client", lambda: BadRedis()
+        "src.deployments.ingress._redis_client", lambda: BadRedis()
     )
 
-    from src.ray_serve.deployments.ingress import IngressDeployment, SearchRequest
+    from src.deployments.ingress import IngressDeployment, SearchRequest
 
     router = FakeHandle(
         route=lambda q, user_id=None: {
@@ -178,10 +178,10 @@ async def test_ab_flow_base_no_rerank(monkeypatch):
             return P()
 
     monkeypatch.setattr(
-        "src.ray_serve.deployments.ingress._redis_client", lambda: DummyRedis()
+        "src.deployments.ingress._redis_client", lambda: DummyRedis()
     )
 
-    from src.ray_serve.deployments.ingress import IngressDeployment, SearchRequest
+    from src.deployments.ingress import IngressDeployment, SearchRequest
 
     # Track reranker call count
     calls = {"rerank": 0}
@@ -250,10 +250,10 @@ async def test_ab_flow_smart_calls_rerank(monkeypatch):
             return P()
 
     monkeypatch.setattr(
-        "src.ray_serve.deployments.ingress._redis_client", lambda: DummyRedis()
+        "src.deployments.ingress._redis_client", lambda: DummyRedis()
     )
 
-    from src.ray_serve.deployments.ingress import IngressDeployment, SearchRequest
+    from src.deployments.ingress import IngressDeployment, SearchRequest
 
     # Track reranker call count
     calls = {"rerank": 0}

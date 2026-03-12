@@ -45,9 +45,12 @@ from pymilvus import (
 )
 from tqdm import tqdm
 
+from src.redis_metadata import build_item_metadata, canonical_article_id, item_key, item_meta_key
+
 # Default configuration (can be overridden by environment variables)
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_TLS = os.getenv("REDIS_TLS", "false").lower() in ("1", "true", "yes")
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
 MILVUS_PORT = os.getenv("MILVUS_PORT", "19530")
 MILVUS_COLLECTION = os.getenv("MILVUS_COLLECTION", "scale_style_bge_v2")
@@ -91,19 +94,8 @@ def export_metadata(
 
     metadata = {}
     for _, row in tqdm(df.iterrows(), total=len(df), desc="Exporting"):
-        article_id = str(int(row["article_id"]))
-        metadata[article_id] = {
-            "article_id": article_id,
-            "colour_group_name": str(row.get("colour_group_name", "")),
-            "product_type_name": str(row.get("product_type_name", "")),
-            "department_name": str(row.get("department_name", "")),
-            "detail_desc": str(row.get("detail_desc", ""))[:5000],
-        }
-
-        if "price" in df.columns:
-            metadata[article_id]["price"] = str(row.get("price", ""))
-        if "image_url" in df.columns:
-            metadata[article_id]["image_url"] = str(row.get("image_url", ""))
+        article_id = canonical_article_id(row["article_id"])
+        metadata[article_id] = build_item_metadata(row)
 
     # Ensure output directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -118,7 +110,13 @@ def load_redis_data(df):
     """Load Redis metadata and popularity ZSET"""
     print("\n[2/4] Loading Redis data...")
 
-    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+    r = redis.Redis(
+        host=REDIS_HOST,
+        port=REDIS_PORT,
+        decode_responses=True,
+        ssl=REDIS_TLS,
+        ssl_cert_reqs="required" if REDIS_TLS else None,
+    )
 
     # Test connection
     try:
@@ -134,24 +132,11 @@ def load_redis_data(df):
     popularity_ids = []
 
     for _, row in tqdm(df.iterrows(), total=len(df), desc="Redis metadata"):
-        # Pad article_id to 10 digits to match Gateway padArticleId()
-        article_id = str(int(row["article_id"])).zfill(10)
-        key = f"item:{article_id}"
+        article_id = canonical_article_id(row["article_id"])
+        meta = build_item_metadata(row)
 
-        meta = {
-            "article_id": article_id,
-            "prod_name": str(row.get("prod_name", "Unknown Product")),
-            "product_type_name": str(row.get("product_type_name", "")),
-            "department_name": str(row.get("department_name", "")),
-            "detail_desc": str(row.get("detail_desc", ""))[:5000],
-        }
-
-        if "price" in df.columns:
-            meta["price"] = str(row.get("price", ""))
-        if "image_url" in df.columns:
-            meta["image_url"] = str(row.get("image_url", ""))
-
-        pipe.hset(key, mapping=meta)
+        pipe.hset(item_key(article_id), mapping=meta)
+        pipe.hset(item_meta_key(article_id), mapping=meta)
 
         # Collect for popularity list (use padded ID)
         if len(popularity_ids) < POPULARITY_TOPN:
@@ -251,7 +236,13 @@ def verify_data():
 
     # Verify Redis
     try:
-        r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+        r = redis.Redis(
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            decode_responses=True,
+            ssl=REDIS_TLS,
+            ssl_cert_reqs="required" if REDIS_TLS else None,
+        )
         r.ping()
 
         # Check sample item

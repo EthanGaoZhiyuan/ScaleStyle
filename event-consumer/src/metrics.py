@@ -1,268 +1,384 @@
-"""
-Metrics Server for Event Consumer
+"""Production-grade Metrics for Event Consumer using Prometheus native instrumentation
 
-Exposes HTTP endpoint for observability:
-- GET /metrics (Prometheus format)
-- GET /health
+Exposes HTTP endpoints for observability and Kubernetes probes:
+- GET /metrics  — Prometheus exposition format
+- GET /live     — Kubernetes livenessProbe: in-process health only (loop alive, poll freshness)
+- GET /ready    — Kubernetes readinessProbe: full dependency health (Kafka, Redis, assignment)
+- GET /health   — Backward-compat alias for /ready
+
+Liveness vs readiness split rationale
+--------------------------------------
+Liveness (/live) checks only in-process state.  It must never touch external
+dependencies, because a transient Kafka rebalance or Redis blip should NOT
+trigger a pod restart.  Unnecessary restarts amplify rebalances into storms.
+
+Readiness (/ready) checks whether the consumer can actually process traffic.
+A NotReady pod is excluded from rolling-deployment gates and PodDisruptionBudget
+windows, but is NOT restarted.  Failing readiness during a rebalance is safe.
+
+Redis readiness design choice (see RUNBOOK.md)
+---------------------------------------------
+Redis failures do NOT flip readiness.  The consumer stays Ready and relies on
+retry/DLQ for Redis errors.  Operators must use redis_consecutive_errors,
+redis_unavailable_duration_seconds, and rate(events_retry_routed_total) to
+detect "ready but all traffic in retry" scenarios.
 
 Metrics exposed:
-- events_processed_total
-- events_failed_total
-- events_deduped_total
-- consumer_uptime_seconds
-- processing_rate (events/sec)
+- Counters: events_processed_total, events_failed_total, events_retry_routed_total, etc.
+- Histograms: event_processing_latency_seconds, redis_update_latency_seconds
+- Gauges: consumer_health, redis_available, redis_consecutive_errors, redis_unavailable_duration_seconds
 """
 
+import json
+import logging
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from threading import Thread
-import logging
+from typing import Callable, Optional
+
+from prometheus_client import (
+    Counter,
+    Gauge,
+    Histogram,
+    CONTENT_TYPE_LATEST,
+    REGISTRY,
+    generate_latest,
+)
 
 logger = logging.getLogger(__name__)
 
+# ==========================================
+# Counter Metrics
+# ==========================================
 
-class MetricsCollector:
-    """Collects and stores metrics"""
+# Event processing outcomes
+events_processed_total = Counter(
+    "events_processed_total",
+    "Total events successfully processed and committed",
+    ["result"],  # labels: applied, duplicate
+)
 
-    def __init__(self):
-        self.start_time = time.time()
-        self.processed = 0
-        self.failed = 0
-        self.deduped = 0
+events_failed_total = Counter(
+    "events_failed_total",
+    "Total events that failed processing",
+    ["failure_type"],  # labels: transient, permanent, validation
+)
 
-        # P1.7: Latency tracking
-        self.processing_latencies = []  # Last 1000 samples
-        self.max_latency_samples = 1000
+events_retry_routed_total = Counter(
+    "events_retry_routed_total",
+    "Total events routed to retry topic due to transient failures",
+    ["retry_count"],  # labels: "1", "2", "3", etc.
+)
 
-        # P1.3: Feature-quality metrics
-        self.category_lookup_hit = 0
-        self.category_lookup_miss = 0
-        self.unknown_category_events = 0
-        self.lua_materialization_failures = 0
+events_retry_tier_routed_total = Counter(
+    "events_retry_tier_routed_total",
+    "Total events routed to each retry tier",
+    ["retry_count", "retry_tier"],
+)
 
-    def incr_processed(self):
-        self.processed += 1
+events_dlq_sent_total = Counter(
+    "events_dlq_sent_total",
+    "Total events sent to Dead Letter Queue",
+    ["reason"],  # labels: max_retries_exceeded, permanent_failure, validation_error
+)
 
-    def incr_failed(self):
-        self.failed += 1
+events_duplicate_total = Counter(
+    "events_duplicate_total",
+    "Total duplicate events skipped via idempotency check",
+)
 
-    def incr_deduped(self):
-        self.deduped += 1
+events_commit_failed_total = Counter(
+    "events_commit_failed_total",
+    "Total Kafka offset commit failures after a downstream write already succeeded",
+    # labels:
+    #   retry_routed_terminating — retry was published then commit failed; process terminates
+    #   dlq_send_success         — DLQ was written then commit failed; process terminates
+    ["reason"],
+)
 
-    def incr_category_hit(self):
-        """Category lookup succeeded (P1.3)"""
-        self.category_lookup_hit += 1
+consumer_terminations_total = Counter(
+    "consumer_terminations_total",
+    "Total event-consumer process terminations by terminal reason",
+    ["reason"],  # labels: downstream_commit_uncertain, fatal_loop_error
+)
 
-    def incr_category_miss(self):
-        """Category lookup failed/unknown (P1.3)"""
-        self.category_lookup_miss += 1
+# Feature-level metrics (failures only - success tracked via events_processed_total)
+feature_failures_total = Counter(
+    "feature_update_failures_total",
+    "Total feature update failures by feature type",
+    ["feature"],
+)
 
-    def incr_unknown_category(self):
-        """Event has unknown/missing category (P1.3)"""
-        self.unknown_category_events += 1
+# Redis operations
+redis_operations_total = Counter(
+    "redis_operations_total",
+    "Total Redis operations",
+    ["operation", "status"],  # operation: lua_decay_upsert, category_lookup, dlq_mark; status: success, error
+)
 
-    def incr_lua_failure(self):
-        """Lua script materialization failed (P1.3)"""
-        self.lua_materialization_failures += 1
+# Kafka operations
+kafka_produce_total = Counter(
+    "kafka_produce_total",
+    "Total Kafka produce operations",
+    ["topic", "status"],  # topic: retry, dlq; status: success, error
+)
 
-    def observe_processing_latency(self, latency_ms: float):
-        """Record processing latency (P1.7)"""
-        self.processing_latencies.append(latency_ms)
-        if len(self.processing_latencies) > self.max_latency_samples:
-            self.processing_latencies.pop(0)
+# ==========================================
+# Histogram Metrics
+# ==========================================
 
-    def uptime(self):
-        return time.time() - self.start_time
+# Event processing latency (end-to-end)
+event_processing_latency_seconds = Histogram(
+    "event_processing_latency_seconds",
+    "Event processing latency from consume to commit",
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
 
-    def rate(self):
-        uptime = self.uptime()
-        return self.processed / uptime if uptime > 0 else 0.0
+# Redis update latency
+redis_update_latency_seconds = Histogram(
+    "redis_update_latency_seconds",
+    "Redis Lua script execution latency",
+    buckets=(0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5),
+)
 
-    def latency_stats(self):
-        """Calculate latency percentiles (P1.7)"""
-        if not self.processing_latencies:
-            return {"p50": 0.0, "p95": 0.0, "p99": 0.0, "avg": 0.0}
+# Retry delay (how long message waited before retry)
+retry_delay_seconds = Histogram(
+    "retry_delay_seconds",
+    "Actual delay between failure and retry consumption",
+    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0),
+)
 
-        sorted_latencies = sorted(self.processing_latencies)
-        n = len(sorted_latencies)
-        p50_idx = int(n * 0.50)
-        p95_idx = int(n * 0.95)
-        p99_idx = int(n * 0.99)
+# ==========================================
+# Gauge Metrics
+# ==========================================
 
-        return {
-            "p50": sorted_latencies[p50_idx] if p50_idx < n else 0.0,
-            "p95": sorted_latencies[p95_idx] if p95_idx < n else 0.0,
-            "p99": sorted_latencies[p99_idx] if p99_idx < n else 0.0,
-            "avg": sum(sorted_latencies) / n,
-        }
+# Consumer health (1 = healthy, 0 = unhealthy)
+consumer_health = Gauge(
+    "consumer_health",
+    "Consumer health status (1 = healthy, 0 = unhealthy)",
+)
 
-    def to_prometheus(self):
-        """Format metrics in Prometheus exposition format"""
-        metrics = []
+# Redis availability (1 = available, 0 = unavailable)
+redis_available = Gauge(
+    "redis_available",
+    "Redis availability status (1 = available, 0 = unavailable)",
+)
 
-        # Counter metrics
-        metrics.append(
-            "# HELP events_processed_total Total events successfully processed"
-        )
-        metrics.append("# TYPE events_processed_total counter")
-        metrics.append(f"events_processed_total {self.processed}")
+# Redis error streak (for "ready but traffic in retry" detection)
+# Updated by record_redis_success/record_redis_error.  Used with alerting when
+# Redis is intentionally excluded from readiness — see RUNBOOK.md.
+redis_consecutive_errors = Gauge(
+    "redis_consecutive_errors",
+    "Consecutive Redis errors (reset on first success). Use with alerts when Redis is excluded from readiness.",
+)
 
-        metrics.append(
-            "# HELP events_failed_total Total events that failed processing"
-        )
-        metrics.append("# TYPE events_failed_total counter")
-        metrics.append(f"events_failed_total {self.failed}")
+redis_unavailable_duration_seconds = Gauge(
+    "redis_unavailable_duration_seconds",
+    "Seconds since current Redis error streak started (0 if healthy). Use with alerts — see RUNBOOK.md.",
+)
 
-        metrics.append("# HELP events_deduped_total Total duplicate events skipped")
-        metrics.append("# TYPE events_deduped_total counter")
-        metrics.append(f"events_deduped_total {self.deduped}")
-
-        # P1.3: Feature-quality metrics
-        metrics.append(
-            "# HELP category_lookup_hit_total Category lookups that found a valid category"
-        )
-        metrics.append("# TYPE category_lookup_hit_total counter")
-        metrics.append(f"category_lookup_hit_total {self.category_lookup_hit}")
-
-        metrics.append(
-            "# HELP category_lookup_miss_total Category lookups that failed or returned unknown"
-        )
-        metrics.append("# TYPE category_lookup_miss_total counter")
-        metrics.append(f"category_lookup_miss_total {self.category_lookup_miss}")
-
-        metrics.append(
-            "# HELP unknown_category_events_total Events processed with unknown/missing category"
-        )
-        metrics.append("# TYPE unknown_category_events_total counter")
-        metrics.append(f"unknown_category_events_total {self.unknown_category_events}")
-
-        metrics.append(
-            "# HELP lua_materialization_failures_total Lua script execution failures"
-        )
-        metrics.append("# TYPE lua_materialization_failures_total counter")
-        metrics.append(
-            f"lua_materialization_failures_total {self.lua_materialization_failures}"
-        )
-
-        # Gauge metrics
-        metrics.append("# HELP consumer_uptime_seconds Consumer uptime in seconds")
-        metrics.append("# TYPE consumer_uptime_seconds gauge")
-        metrics.append(f"consumer_uptime_seconds {self.uptime():.1f}")
-
-        metrics.append("# HELP processing_rate_events_per_sec Current processing rate")
-        metrics.append("# TYPE processing_rate_events_per_sec gauge")
-        metrics.append(f"processing_rate_events_per_sec {self.rate():.2f}")
-
-        # P1.7: Latency metrics
-        latency = self.latency_stats()
-        metrics.append(
-            "# HELP event_processing_latency_p50_ms Event processing latency p50 in milliseconds"
-        )
-        metrics.append("# TYPE event_processing_latency_p50_ms gauge")
-        metrics.append(f"event_processing_latency_p50_ms {latency['p50']:.2f}")
-
-        metrics.append(
-            "# HELP event_processing_latency_p95_ms Event processing latency p95 in milliseconds"
-        )
-        metrics.append("# TYPE event_processing_latency_p95_ms gauge")
-        metrics.append(f"event_processing_latency_p95_ms {latency['p95']:.2f}")
-
-        metrics.append(
-            "# HELP event_processing_latency_p99_ms Event processing latency p99 in milliseconds"
-        )
-        metrics.append("# TYPE event_processing_latency_p99_ms gauge")
-        metrics.append(f"event_processing_latency_p99_ms {latency['p99']:.2f}")
-
-        metrics.append(
-            "# HELP event_processing_latency_avg_ms Event processing latency average in milliseconds"
-        )
-        metrics.append("# TYPE event_processing_latency_avg_ms gauge")
-        metrics.append(f"event_processing_latency_avg_ms {latency['avg']:.2f}")
-
-        return "\n".join(metrics) + "\n"
-
-    def to_json(self):
-        """Format metrics as JSON"""
-        import json
-
-        latency = self.latency_stats()
-        return json.dumps(
-            {
-                "events_processed_total": self.processed,
-                "events_failed_total": self.failed,
-                "events_deduped_total": self.deduped,
-                "consumer_uptime_seconds": round(self.uptime(), 1),
-                "processing_rate_events_per_sec": round(self.rate(), 2),
-                "event_processing_latency_ms": {
-                    "p50": round(latency["p50"], 2),
-                    "p95": round(latency["p95"], 2),
-                    "p99": round(latency["p99"], 2),
-                    "avg": round(latency["avg"], 2),
-                },
-            },
-            indent=2,
-        )
+# Thread-safe state for Redis error streak
+_redis_streak_lock = threading.Lock()
+_redis_consecutive_errors_value = 0
+_redis_error_streak_started_at: Optional[float] = None
 
 
-class MetricsHandler(BaseHTTPRequestHandler):
-    """HTTP request handler for metrics endpoint"""
+def record_redis_success() -> None:
+    """Record a successful Redis operation. Resets consecutive error count and unavailable duration."""
+    global _redis_consecutive_errors_value, _redis_error_streak_started_at
+    with _redis_streak_lock:
+        _redis_consecutive_errors_value = 0
+        _redis_error_streak_started_at = None
+        redis_consecutive_errors.set(0)
+        redis_unavailable_duration_seconds.set(0)
+        redis_available.set(1)
 
-    collector = None  # Set by MetricsServer
 
-    def log_message(self, format, *args):
-        """Suppress default HTTP server logs"""
-        pass
+def record_redis_error() -> None:
+    """Record a Redis error. Increments consecutive count and tracks streak start."""
+    global _redis_consecutive_errors_value, _redis_error_streak_started_at
+    with _redis_streak_lock:
+        if _redis_consecutive_errors_value == 0:
+            _redis_error_streak_started_at = time.time()
+        _redis_consecutive_errors_value += 1
+        redis_consecutive_errors.set(_redis_consecutive_errors_value)
+        redis_available.set(0)
 
-    def do_GET(self):
-        if self.path == "/metrics":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain; version=0.0.4")
-            self.end_headers()
-            self.wfile.write(self.collector.to_prometheus().encode("utf-8"))
 
-        elif self.path == "/metrics.json":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(self.collector.to_json().encode("utf-8"))
-
-        elif self.path == "/health":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"OK\n")
-
+def refresh_redis_unavailable_duration() -> None:
+    """Update redis_unavailable_duration_seconds. Call from /ready handler or periodically."""
+    with _redis_streak_lock:
+        if _redis_error_streak_started_at is None:
+            redis_unavailable_duration_seconds.set(0)
         else:
-            self.send_response(404)
-            self.end_headers()
-            self.wfile.write(b"Not Found\n")
+            redis_unavailable_duration_seconds.set(time.time() - _redis_error_streak_started_at)
+
+
+# Kafka consumer lag (updated periodically if available)
+kafka_consumer_lag = Gauge(
+    "kafka_consumer_lag",
+    "Kafka consumer lag (messages behind)",
+    ["topic", "partition"],
+)
+
+# Consumer uptime
+consumer_uptime_seconds = Gauge(
+    "consumer_uptime_seconds",
+    "Consumer uptime in seconds",
+)
+
+# Processing rate (updated periodically)
+processing_rate_events_per_sec = Gauge(
+    "processing_rate_events_per_sec",
+    "Current event processing rate",
+)
+
+# Retry partition pause status
+retry_partitions_paused = Gauge(
+    "retry_partitions_paused",
+    "Number of retry partitions currently paused for backoff",
+)
+
+# ==========================================
+# Category LRU Cache Metrics
+# ==========================================
+
+category_cache_ops_total = Counter(
+    "category_cache_ops_total",
+    "Category LRU cache operations by outcome.  "
+    "hit=served from cache; miss=not in cache; expired=was in cache but TTL elapsed.",
+    ["status"],  # hit | miss | expired
+)
+
+category_cache_size = Gauge(
+    "category_cache_size",
+    "Current number of entries in the in-process category LRU cache.  "
+    "Compare with CATEGORY_CACHE_MAX_SIZE to detect eviction pressure.",
+)
 
 
 class MetricsServer:
     """
-    HTTP server for exposing metrics
-    Runs in background thread
+    Metrics and Kubernetes probe server.
+
+    Serves four endpoints on a single port:
+    - GET /metrics  — Prometheus exposition format (unchanged)
+    - GET /live     — Kubernetes livenessProbe  (in-process state only)
+    - GET /ready    — Kubernetes readinessProbe (dependency-sensitive state)
+    - GET /health   — Backward-compat alias for /ready
+
+    Each probe endpoint delegates to an injected callable so the consumer can
+    report its own state without creating a circular import dependency.
+
+    Probe semantics
+    ---------------
+    /live  checks only whether the process main loop is still running and has
+           polled recently enough.  It never touches Kafka or Redis.  A 503
+           here should trigger a pod restart.
+
+    /ready checks full processing readiness including Kafka partition assignment
+           and poll freshness.  A 503 here marks the pod NotReady (excluded from
+           rolling-deployment gates) but does NOT restart it.  This is the safe
+           failure mode for Kafka rebalances and transient dependency outages.
     """
 
-    def __init__(self, collector: MetricsCollector, port: int = 8000):
-        self.collector = collector
+    def __init__(self, port: int = 8000):
         self.port = port
-        self.server = None
-        self.thread = None
+        self.start_time: Optional[float] = None
+        self._liveness_check_fn: Optional[Callable[[], dict]] = None
+        self._readiness_check_fn: Optional[Callable[[], dict]] = None
+        self._server: Optional[HTTPServer] = None
 
-    def start(self):
-        """Start metrics server in background thread"""
-        MetricsHandler.collector = self.collector
+    def set_liveness_check(self, fn: Callable[[], dict]) -> None:
+        """Inject liveness callable: fn() → {'live': bool, 'checks': {...}}
 
-        self.server = HTTPServer(("0.0.0.0", self.port), MetricsHandler)
+        Must only inspect in-process state (loop flags, timestamps).
+        Must NOT call Kafka, Redis, or any external dependency.
+        """
+        self._liveness_check_fn = fn
 
-        self.thread = Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
+    def set_readiness_check(self, fn: Callable[[], dict]) -> None:
+        """Inject readiness callable: fn() → {'healthy': bool, 'checks': {...}}"""
+        self._readiness_check_fn = fn
 
-        logger.info(f"📊 Metrics server started on http://0.0.0.0:{self.port}/metrics")
+    def set_health_check(self, fn: Callable[[], dict]) -> None:
+        """Backward-compat alias for set_readiness_check."""
+        self._readiness_check_fn = fn
 
-    def stop(self):
-        """Stop metrics server"""
-        if self.server:
-            self.server.shutdown()
-            logger.info("📊 Metrics server stopped")
+    def start(self) -> None:
+        import time
+
+        self.start_time = time.time()
+        consumer_health.set(1)
+        # redis_available/consecutive_errors are set by record_redis_success/error
+
+        liveness_fn = self._liveness_check_fn
+        readiness_fn = self._readiness_check_fn
+
+        class _Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/metrics":
+                    output = generate_latest(REGISTRY)
+                    self.send_response(200)
+                    self.send_header("Content-Type", CONTENT_TYPE_LATEST)
+                    self.end_headers()
+                    self.wfile.write(output)
+
+                elif self.path == "/live":
+                    # Kubernetes livenessProbe — in-process checks only.
+                    # 503 here causes a pod restart; must be conservative.
+                    if liveness_fn is not None:
+                        result = liveness_fn()
+                    else:
+                        result = {"live": True, "checks": {}}
+                    status = 200 if result.get("live") else 503
+                    body = json.dumps(result).encode()
+                    self.send_response(status)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(body)
+
+                elif self.path in ("/ready", "/health"):
+                    # Kubernetes readinessProbe (/ready) and backward-compat /health.
+                    # 503 marks pod NotReady — safe for transient dependency failures.
+                    if readiness_fn is not None:
+                        result = readiness_fn()
+                    else:
+                        result = {"healthy": True, "checks": {}}
+                    status = 200 if result.get("healthy") else 503
+                    body = json.dumps(result).encode()
+                    self.send_response(status)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(body)
+
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+            def log_message(self, fmt, *args):  # suppress access log noise
+                pass
+
+        self._server = HTTPServer(("", self.port), _Handler)
+        thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        thread.start()
+        logger.info(f"[SUCCESS] Metrics server started on port {self.port}")
+        logger.info(f"[INFO] Prometheus:  http://0.0.0.0:{self.port}/metrics")
+        logger.info(f"[INFO] Liveness:    http://0.0.0.0:{self.port}/live")
+        logger.info(f"[INFO] Readiness:   http://0.0.0.0:{self.port}/ready")
+        logger.info(f"[INFO] Health(compat): http://0.0.0.0:{self.port}/health")
+
+    def update_uptime(self) -> None:
+        import time
+
+        if self.start_time:
+            consumer_uptime_seconds.set(time.time() - self.start_time)
+
+    def set_processing_rate(self, rate: float) -> None:
+        processing_rate_events_per_sec.set(rate)
+
+    def stop(self) -> None:
+        consumer_health.set(0)
+        if self._server:
+            self._server.shutdown()
+        logger.info("[SHUTDOWN] Metrics server stopped (health set to 0)")

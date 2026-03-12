@@ -1,0 +1,29 @@
+---
+# EFS-backed StorageClass for shared volumes across multiple pods
+# Requires: EFS CSI Driver installed in cluster
+# Use case: inference model cache shared across 2+ replica pods
+#
+# Installation:
+#   kubectl apply -k "github.com/kubernetes-sigs/aws-efs-csi-driver/deploy/kubernetes/overlays/stable/?ref=release-1.7"
+#
+# EFS filesystem must be created in AWS before use:
+#   - Same VPC as EKS cluster
+#   - Security group allowing NFS (port 2049) from worker nodes
+#   - Mount targets in each AZ
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: efs-sc
+provisioner: efs.csi.aws.com
+parameters:
+  provisioningMode: efs-ap  # Access Point mode (isolated subdirectory per PVC)
+  fileSystemId: fs-PLACEHOLDER  # Replace with actual EFS ID at deployment
+  directoryPerms: "700"
+  gidRangeStart: "1000"
+  gidRangeEnd: "2000"
+  basePath: "/scalestyle"
+volumeBindingMode: Immediate
+reclaimPolicy: Delete
+mountOptions:
+  - tls
+  - iam  # Use IAM for authentication (requires IRSA)

@@ -1,0 +1,26 @@
+---
+# Redis PersistentVolumeClaim for AOF and RDB persistence files
+#
+# Critical for deduplication correctness:
+# - Redis stores dedup:{event_id} keys with TTL for preventing duplicate events
+# - Without persistence, pod restarts allow reprocessing of events still in Kafka
+# - This silently corrupts category affinity, popularity, and item click features
+#
+# Base strategy:
+# - Leave storageClassName unset so each environment uses its default StorageClass
+# - 5Gi is sufficient for AOF + RDB snapshots for typical event volumes
+# - EKS overlay deletes this PVC and uses Elasticache instead (see delete-redis.yaml)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: redis
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

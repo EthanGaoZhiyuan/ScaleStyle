@@ -26,12 +26,18 @@ spec:
       initContainers:
       - name: wait-for-redis
         image: busybox:1.35
+        envFrom:
+        - configMapRef:
+            name: scalestyle-config
+        - configMapRef:
+            name: scalestyle-cloud-config
+            optional: true
         command:
         - sh
         - -c
         - |
           echo "Waiting for Redis..."
-          until nc -z redis 6379; do
+          until nc -z "$REDIS_HOST" "$REDIS_PORT"; do
             echo "Redis not ready, sleeping..."
             sleep 2
           done
@@ -39,12 +45,18 @@ spec:
       
       - name: wait-for-milvus
         image: busybox:1.35
+        envFrom:
+        - configMapRef:
+            name: scalestyle-config
+        - configMapRef:
+            name: scalestyle-cloud-config
+            optional: true
         command:
         - sh
         - -c
         - |
           echo "Waiting for Milvus..."
-          until nc -z milvus 19530; do
+          until nc -z "$MILVUS_HOST" "$MILVUS_PORT"; do
             echo "Milvus not ready, sleeping..."
             sleep 5
           done
@@ -53,9 +65,9 @@ spec:
       containers:
       - name: data-loader
         # Fix: Use pre-built image with dependencies baked in
-        # Image will be replaced by Kustomize overlay
-        image: scalestyle-data-init:latest
-        imagePullPolicy: Always
+        # Contract: placeholder tag MUST be replaced by Kustomize overlay images[].
+        image: scalestyle-data-init:__MUST_BE_OVERRIDDEN_BY_KUSTOMIZE__
+        imagePullPolicy: IfNotPresent
         
         # Run bootstrap script from the image
         command: ["python", "-m", "src.bootstrap_data"]
@@ -69,6 +81,9 @@ spec:
         envFrom:
         - configMapRef:
             name: scalestyle-config
+        - configMapRef:
+          name: scalestyle-cloud-config
+          optional: true
         
         # Resource limits
         resources:

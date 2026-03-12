@@ -1,0 +1,178 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  # Responsibility: API ingress producer (main click topic only).
+  name: gateway-producer
+  namespace: kafka-system
+  labels:
+    strimzi.io/cluster: scalestyle-kafka
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: scalestyle.clicks
+          patternType: literal
+        operation: Write
+      - resource:
+          type: topic
+          name: scalestyle.clicks
+          patternType: literal
+        operation: Describe
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  # Responsibility: primary consumer pipeline
+  # (main topic read, retry/dlq writes, primary group read).
+  name: event-consumer-primary
+  namespace: kafka-system
+  labels:
+    strimzi.io/cluster: scalestyle-kafka
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: scalestyle.clicks
+          patternType: literal
+        operation: Read
+      - resource:
+          type: topic
+          name: scalestyle.clicks
+          patternType: literal
+        operation: Describe
+      - resource:
+          type: topic
+          name: scalestyle.clicks.retry.1s
+          patternType: literal
+        operation: Write
+      - resource:
+          type: topic
+          name: scalestyle.clicks.retry.1s
+          patternType: literal
+        operation: Describe
+      - resource:
+          type: topic
+          name: scalestyle.clicks.retry.10s
+          patternType: literal
+        operation: Write
+      - resource:
+          type: topic
+          name: scalestyle.clicks.retry.10s
+          patternType: literal
+        operation: Describe
+      - resource:
+          type: topic
+          name: scalestyle.clicks.retry.60s
+          patternType: literal
+        operation: Write
+      - resource:
+          type: topic
+          name: scalestyle.clicks.retry.60s
+          patternType: literal
+        operation: Describe
+      - resource:
+          type: topic
+          name: scalestyle.clicks.dlq
+          patternType: literal
+        operation: Write
+      - resource:
+          type: topic
+          name: scalestyle.clicks.dlq
+          patternType: literal
+        operation: Describe
+      - resource:
+          type: group
+          name: event-consumer-primary
+          patternType: literal
+        operation: Read
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  # Responsibility: retry consumer pipeline
+  # (retry topic read/requeue, dlq write, retry group read).
+  #
+  # Note: this principal can write retry+dlq by design because the retry worker
+  # performs both actions in-process. This is a deliberate trade-off: simpler
+  # runtime model, wider blast radius if this principal is compromised.
+  #
+  # Hardening path (stricter least-privilege):
+  # split retry reader/requeue/dlq-writer into separate principals/workers.
+  name: event-consumer-retry
+  namespace: kafka-system
+  labels:
+    strimzi.io/cluster: scalestyle-kafka
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: scalestyle.clicks.retry.1s
+          patternType: literal
+        operation: Read
+      - resource:
+          type: topic
+          name: scalestyle.clicks.retry.1s
+          patternType: literal
+        operation: Write
+      - resource:
+          type: topic
+          name: scalestyle.clicks.retry.1s
+          patternType: literal
+        operation: Describe
+      - resource:
+          type: topic
+          name: scalestyle.clicks.retry.10s
+          patternType: literal
+        operation: Read
+      - resource:
+          type: topic
+          name: scalestyle.clicks.retry.10s
+          patternType: literal
+        operation: Write
+      - resource:
+          type: topic
+          name: scalestyle.clicks.retry.10s
+          patternType: literal
+        operation: Describe
+      - resource:
+          type: topic
+          name: scalestyle.clicks.retry.60s
+          patternType: literal
+        operation: Read
+      - resource:
+          type: topic
+          name: scalestyle.clicks.retry.60s
+          patternType: literal
+        operation: Write
+      - resource:
+          type: topic
+          name: scalestyle.clicks.retry.60s
+          patternType: literal
+        operation: Describe
+      - resource:
+          type: topic
+          name: scalestyle.clicks.dlq
+          patternType: literal
+        operation: Write
+      - resource:
+          type: topic
+          name: scalestyle.clicks.dlq
+          patternType: literal
+        operation: Describe
+      - resource:
+          type: group
+          name: event-consumer-retry
+          patternType: literal
+        operation: Read

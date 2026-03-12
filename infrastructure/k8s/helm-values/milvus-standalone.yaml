@@ -6,6 +6,8 @@
 cluster:
   enabled: false
 
+fullnameOverride: milvus
+
 # Standalone configuration
 standalone:
   replicas: 1
@@ -22,7 +24,7 @@ standalone:
   persistence:
     enabled: true
     size: 20Gi
-    # storageClass: ""  # Use default storage class
+    storageClass: scalestyle-ebs
 
 # etcd configuration (metadata store)
 etcd:
@@ -40,6 +42,7 @@ etcd:
   persistence:
     enabled: true
     size: 10Gi
+    storageClass: scalestyle-ebs
 
 # MinIO configuration (object storage)
 minio:
@@ -57,6 +60,7 @@ minio:
   persistence:
     enabled: true
     size: 20Gi
+    storageClass: scalestyle-ebs
   
   # Default credentials (change for production!)
   rootUser: minioadmin

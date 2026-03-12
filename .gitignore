@@ -49,13 +49,26 @@ build/
 *.egg-info/
 env.local
 *.local
-.
+
 # venv / env
 venv/
 .venv/
+env/
+ENV/
 .env
 .env.*
 .python-version
+
+# Terraform local state
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
 
 # caches
 .pytest_cache/

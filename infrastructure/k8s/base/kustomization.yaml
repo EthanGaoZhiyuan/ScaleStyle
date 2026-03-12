@@ -10,12 +10,19 @@ resources:
   - namespace.yaml
   - configmap.yaml
   - redis.yaml
+  - redis-pvc.yaml
+  - inference-model-cache-pvc.yaml
   - inference.yaml
+  - inference-hpa.yaml
+  - inference-pdb.yaml
   - gateway.yaml
+  - gateway-hpa.yaml
+  - event-consumer.yaml
+  - event-consumer-primary-hpa.yaml
+  - event-consumer-retry.yaml
   - ingress.yaml
   - jaeger.yaml
   - init-job.yaml
-  - gateway-hpa.yaml
 
 # Common labels applied to all resources
 commonLabels:

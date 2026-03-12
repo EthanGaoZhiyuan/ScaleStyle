@@ -1,0 +1,17 @@
+---
+# EKS production patch for the inference model cache PVC.
+# Uses EFS (ReadWriteMany) to support 2+ inference replicas on different nodes.
+# EBS (ReadWriteOnce) would block multi-replica deployment.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: inference-model-cache
+  namespace: scalestyle
+spec:
+  # EFS access mode required for multi-replica deployment across nodes
+  accessModes:
+    - ReadWriteMany
+  storageClassName: efs-sc
+  resources:
+    requests:
+      storage: 50Gi

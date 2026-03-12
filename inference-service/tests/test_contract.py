@@ -3,7 +3,7 @@ def test_contract_normalize_stable_fields():
     Test that contract normalization produces stable output even with missing fields
     Boundary condition: Input data missing multiple fields
     """
-    from src.ray_serve.deployments.ingress import _contract_normalize
+    from src.utils.contract import _contract_normalize
 
     # Input data missing many fields
     raw = [
@@ -42,7 +42,7 @@ def test_contract_normalize_empty_input():
     Test handling of empty input
     Boundary condition: Empty list input
     """
-    from src.ray_serve.deployments.ingress import _contract_normalize
+    from src.utils.contract import _contract_normalize
 
     raw = []
     out, dbg = _contract_normalize(raw, limit=10)

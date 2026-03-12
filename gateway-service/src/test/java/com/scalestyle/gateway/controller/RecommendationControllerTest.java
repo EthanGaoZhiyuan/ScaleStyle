@@ -11,9 +11,11 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -38,12 +40,16 @@ class RecommendationControllerTest {
                 .imgUrl("http://mock.url/img.jpg")
                 .build();
 
-        when(recommendationService.search(eq("black jeans"), nullable(String.class), nullable(String.class), eq(5), eq(false)))
-                .thenReturn(List.of(mockDetail));
+        when(recommendationService.searchAsync(eq("black jeans"), nullable(String.class), nullable(String.class), eq(5), eq(false)))
+                .thenReturn(CompletableFuture.completedFuture(List.of(mockDetail)));
 
-        mockMvc.perform(get("/api/recommendation/search")
+        var mvcResult = mockMvc.perform(get("/api/recommendation/search")
                         .param("query", "black jeans")
                         .param("k", "5"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+
+        mockMvc.perform(asyncDispatch(mvcResult))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(ResultCode.SUCCESS.getCode()))
                 .andExpect(jsonPath("$.message").value(ResultCode.SUCCESS.getMessage()))
@@ -57,20 +63,21 @@ class RecommendationControllerTest {
     @DisplayName("GET /api/recommendation/search - Missing required param query")
     void testSearchMissingQuery() throws Exception {
         mockMvc.perform(get("/api/recommendation/search"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(ResultCode.BAD_REQUEST.getCode()))
-                .andExpect(jsonPath("$.message").value("Required parameter missing: query"));
+                .andExpect(status().isBadRequest());
     }
 
     @Test
     @DisplayName("GET /api/recommendation/search - Service throws exception")
     void testSearchServiceError() throws Exception {
-        when(recommendationService.search(anyString(), any(), any(), anyInt(), anyBoolean()))
-                .thenThrow(new RuntimeException("Inference service call failed"));
+        when(recommendationService.searchAsync(anyString(), any(), any(), anyInt(), anyBoolean()))
+                .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Inference service call failed")));
 
-        mockMvc.perform(get("/api/recommendation/search")
+        var mvcResult = mockMvc.perform(get("/api/recommendation/search")
                         .param("query", "x"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(ResultCode.INTERNAL_SERVER_ERROR.getCode()));
+                .andExpect(request().asyncStarted())
+                .andReturn();
+
+        mockMvc.perform(asyncDispatch(mvcResult))
+                .andExpect(status().isInternalServerError());
     }
 }

@@ -1,5 +1,12 @@
 ---
 # Redis Deployment: In-memory cache for popular items and metadata
+#
+# IMPORTANT: This deployment runs Redis in standalone mode (single instance).
+# Cluster mode (sharding) is NOT supported by the event-consumer Lua script,
+# which performs atomic writes across multiple key prefixes that would hash to
+# different cluster slots (CROSSSLOT error). See event-consumer/src/consumer.py
+# for details. For production HA, use ElastiCache replication group with
+# automatic_failover_enabled=true (multi-AZ replicas), not cluster mode.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -25,6 +32,18 @@ spec:
       containers:
       - name: redis
         image: redis:7.2-alpine
+        # Enable AOF persistence for event deduplication correctness
+        # Without persistence, dedup keys are lost on restart → duplicate feature updates
+        command:
+          - redis-server
+          - --appendonly
+          - "yes"
+          - --appendfsync
+          - everysec
+          - --save
+          - "60 1000"
+          - --save
+          - "300 100"
         ports:
         - name: redis
           containerPort: 6379
@@ -62,15 +81,16 @@ spec:
           successThreshold: 1
           failureThreshold: 3
         
-        # Persistent volume (optional - for production)
-        # volumeMounts:
-        # - name: redis-data
-        #   mountPath: /data
+        # Persistent volume for AOF and RDB files
+        # Required for deduplication correctness across restarts
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
       
-      # volumes:
-      # - name: redis-data
-      #   persistentVolumeClaim:
-      #     claimName: redis-pvc
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: redis-pvc
 
 ---
 # Redis Service: ClusterIP for internal access

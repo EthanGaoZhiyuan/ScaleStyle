@@ -1,0 +1,138 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-consumer-primary
+  namespace: scalestyle
+  labels:
+    app: scalestyle
+    component: event-consumer
+    role: feature-updater
+    consumer-mode: primary
+spec:
+  replicas: 2
+  # Rolling update strategy for Kafka consumers
+  # ─────────────────────────────────────────────
+  # maxUnavailable: 0  — never kill the old pod before the new one is Ready.
+  #   This prevents a window where total consumer count drops and the remaining
+  #   pods must absorb a sudden partition rebalance under full load.
+  # maxSurge: 1        — allow one extra pod during the rollout so the new pod
+  #   can complete its rebalance + readiness checks before the old pod is stopped.
+  #
+  # Why NotReady is safe here (readiness probe context):
+  #   The readiness probe checks Kafka partition assignment and poll freshness.
+  #   A NotReady pod is removed from load-balancer endpoints (n/a for consumers)
+  #   but is NOT restarted — the pod keeps consuming from its assigned partitions.
+  #   Redis failure is informational-only in the probe (does not flip ready=False)
+  #   to avoid a coordinated NotReady storm across all pods on a Redis blip.
+  #   See: event-consumer/src/consumer.py _health_check() for the full design.
+  #
+  # Drain/rollback advice:
+  #   Always verify consumer group lag (kafka-consumer-groups.sh --describe) before
+  #   and after a rollout.  A successful rollout should show lag returning to
+  #   pre-deploy levels within 2×poll-interval (~2 s) on each partition.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: scalestyle
+      component: event-consumer
+      consumer-mode: primary
+  template:
+    metadata:
+      labels:
+        app: scalestyle
+        component: event-consumer
+        role: feature-updater
+        consumer-mode: primary
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: event-consumer
+        image: scalestyle-event-consumer:__MUST_BE_OVERRIDDEN_BY_KUSTOMIZE__
+        # IfNotPresent is correct for production, but ONLY when the tag is immutable
+        # (e.g. "git-3f8c9ab").  The EKS overlay replaces both image name and tag via
+        # kustomization.yaml images[].newTag, which is injected by sync-ecr-images.sh.
+        # Never deploy with newTag:latest in the overlay — it violates this contract.
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CONSUMER_MODE
+          value: "primary"
+        # Override the shared configmap value (5s) with a consumer-safe timeout.
+        # The consumer poll loop processes up to KAFKA_POLL_MAX_RECORDS messages per
+        # batch; a 5s Redis timeout per call × 100 messages = 500s >> Kafka's
+        # max_poll_interval_ms (300s), causing a forced group rebalance on any Redis blip.
+        # 500ms is long enough to absorb an ElastiCache failover acknowledgement while
+        # keeping worst-case batch time well under the 300s poll interval budget.
+        - name: REDIS_SOCKET_TIMEOUT
+          value: "0.5"
+        - name: REDIS_SOCKET_CONNECT_TIMEOUT
+          value: "0.5"
+        - name: KAFKA_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: event-consumer-primary-kafka-auth
+              key: KAFKA_USERNAME
+        - name: KAFKA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: event-consumer-primary-kafka-auth
+              key: KAFKA_PASSWORD
+        - name: KAFKA_SSL_CAFILE
+          value: "/etc/kafka/secrets/ca.crt"
+        envFrom:
+        - configMapRef:
+            name: scalestyle-config
+        - configMapRef:
+            name: scalestyle-cloud-config
+            optional: true
+        ports:
+        - name: metrics
+          containerPort: 8000
+          protocol: TCP
+        volumeMounts:
+        - name: kafka-cluster-ca
+          mountPath: /etc/kafka/secrets
+          readOnly: true
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        # readinessProbe: dependency-sensitive checks (Kafka assignment, poll freshness,
+        # Redis).  A failure marks the pod NotReady — safe for transient rebalances
+        # because NotReady does NOT restart the pod.  The pod is re-admitted once
+        # the checks recover (e.g., rebalance completes and partitions are re-assigned).
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        # livenessProbe: in-process checks only (loop alive, poll not stale >300 s).
+        # A failure here genuinely indicates the process is stuck and needs a restart.
+        # Higher periodSeconds and initialDelaySeconds give the consumer time to
+        # complete rebalances before a restart is considered — prevents restart storms.
+        livenessProbe:
+          httpGet:
+            path: /live
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+      volumes:
+      - name: kafka-cluster-ca
+        secret:
+          secretName: kafka-cluster-ca

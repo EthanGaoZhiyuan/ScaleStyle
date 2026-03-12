@@ -1,0 +1,174 @@
+# Event Consumer Prometheus Alert Rules
+#
+# Design context: Redis failures do NOT flip readiness. The consumer stays Ready
+# and routes traffic to retry/DLQ. These alerts ARE the missing visibility for
+# that design decision — without them, "ready but all traffic in retry" is
+# invisible to operators.
+#
+# See event-consumer/RUNBOOK.md for the full design rationale and incident runbook.
+
+groups:
+  - name: event-consumer-lag
+    rules:
+      # Warning: Primary consumer group is falling behind. Feature freshness is
+      # degrading. Affinity scores and popularity windows are increasingly stale.
+      # This is the PRIMARY SLO metric for real-time personalization.
+      - alert: KafkaConsumerGroupLagHigh
+        expr: |
+          kafka_consumer_group_lag{
+            topic="scalestyle.clicks",
+            consumergroup="event-consumer-primary"
+          } > 10000
+        for: 5m
+        labels:
+          severity: warning
+          component: event-consumer
+        annotations:
+          summary: "Click event consumer falling behind — feature freshness degrading"
+          description: |
+            kafka_consumer_group_lag={{ $value }} on scalestyle.clicks for
+            event-consumer-primary. Feature freshness is degrading. Users may see
+            stale affinity scores and popularity rankings. Check consumer throughput:
+              rate(events_processed_total[5m])
+            If throughput is low, scale consumer replicas:
+              kubectl scale deployment event-consumer-primary --replicas=6 -n scalestyle
+            See RUNBOOK.md for diagnosis steps.
+          runbook_url: "https://github.com/scalestyle/ScaleStyle/blob/main/event-consumer/RUNBOOK.md"
+
+      # Critical: Primary consumer group is critically behind. Feature freshness is
+      # severely degraded. Immediate action required to prevent user-visible quality
+      # degradation in recommendations.
+      - alert: KafkaConsumerGroupLagCritical
+        expr: |
+          kafka_consumer_group_lag{
+            topic="scalestyle.clicks",
+            consumergroup="event-consumer-primary"
+          } > 100000
+        for: 2m
+        labels:
+          severity: critical
+          component: event-consumer
+        annotations:
+          summary: "Click event consumer critically behind — IMMEDIATE ACTION REQUIRED"
+          description: |
+            kafka_consumer_group_lag={{ $value }} on scalestyle.clicks. Feature
+            freshness is SEVERELY degraded. Users are seeing significantly stale
+            recommendations. Escalate immediately. Scale aggressively:
+              kubectl scale deployment event-consumer-primary --replicas=10 -n scalestyle
+            Check for processing bottlenecks (Redis latency, CPU saturation).
+            See RUNBOOK.md §7 for emergency escalation.
+          runbook_url: "https://github.com/scalestyle/ScaleStyle/blob/main/event-consumer/RUNBOOK.md"
+
+  - name: event-consumer-redis
+    rules:
+      # Warning: Redis errors are accumulating. Some traffic is being rerouted
+      # to retry. Consumer stays Ready by design — this alert IS the visibility.
+      - alert: EventConsumerRedisConsecutiveErrors
+        expr: redis_consecutive_errors > 10
+        for: 2m
+        labels:
+          severity: warning
+          component: event-consumer
+        annotations:
+          summary: "Event consumer experiencing consecutive Redis errors"
+          description: |
+            redis_consecutive_errors={{ $value }}. Consumer stays Ready on Redis failure;
+            traffic is routed to retry/DLQ. This is expected behaviour — not a bug.
+            Check Redis connectivity and rate(events_retry_routed_total[5m]).
+            See RUNBOOK.md §4 for step-by-step diagnosis.
+          runbook_url: "https://github.com/scalestyle/ScaleStyle/blob/main/event-consumer/RUNBOOK.md"
+
+      # Critical: Redis has been unavailable for >5 minutes. All feature updates
+      # are failing. Retry topic is growing. Escalation required.
+      - alert: EventConsumerRedisUnavailableDuration
+        expr: redis_unavailable_duration_seconds > 300
+        for: 1m
+        labels:
+          severity: critical
+          component: event-consumer
+        annotations:
+          summary: "Event consumer Redis unavailable for >5 minutes"
+          description: |
+            redis_unavailable_duration_seconds={{ $value }}s. All feature updates
+            are failing; all traffic is in retry/DLQ. Consumer is Ready by design
+            but feature freshness is fully stale. Escalate immediately.
+            See RUNBOOK.md §4 Step 3 for Redis diagnosis.
+          runbook_url: "https://github.com/scalestyle/ScaleStyle/blob/main/event-consumer/RUNBOOK.md"
+
+  - name: event-consumer-retry
+    rules:
+      # Warning: Retry topic is growing. Could be Redis failure (check redis_consecutive_errors)
+      # or a sustained upstream error rate.
+      - alert: EventConsumerRetryTopicGrowthRateHigh
+        expr: rate(events_retry_routed_total[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: event-consumer
+        annotations:
+          summary: "Event consumer retry topic growth rate elevated"
+          description: |
+            rate(events_retry_routed_total[5m])={{ $value }}/s. Check
+            redis_consecutive_errors and redis_unavailable_duration_seconds.
+            High retry rate with ready pods = Redis failure routing all traffic.
+            See RUNBOOK.md §4 for correlation steps.
+          runbook_url: "https://github.com/scalestyle/ScaleStyle/blob/main/event-consumer/RUNBOOK.md"
+
+      # Critical: Messages are accumulating in DLQ. This indicates permanent failures
+      # (schema errors) or max-retry exhaustion. Inspect DLQ payload for root cause.
+      - alert: EventConsumerDlqGrowthRateHigh
+        expr: rate(events_dlq_sent_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: critical
+          component: event-consumer
+        annotations:
+          summary: "Event consumer DLQ growth rate elevated"
+          description: |
+            rate(events_dlq_sent_total[5m])={{ $value }}/s. Messages are being
+            permanently abandoned. This may indicate: schema changes without
+            migration, max retries exhausted due to prolonged Redis outage, or
+            malformed upstream events. Inspect DLQ topic:
+              kafka-console-consumer.sh --topic scalestyle.clicks.dlq --from-beginning --max-messages 10
+            See RUNBOOK.md §6 for DLQ investigation steps.
+          runbook_url: "https://github.com/scalestyle/ScaleStyle/blob/main/event-consumer/RUNBOOK.md"
+
+      # Warning: Retry consumer is falling behind. If Redis is healthy this may
+      # indicate the retry consumer needs scaling.
+      - alert: EventConsumerRetryLagHigh
+        expr: kafka_consumer_lag{topic="scalestyle.clicks.retry"} > 10000
+        for: 10m
+        labels:
+          severity: warning
+          component: event-consumer
+        annotations:
+          summary: "Event consumer retry topic lag is high"
+          description: |
+            kafka_consumer_lag={{ $value }} on retry topic. If redis_consecutive_errors
+            is non-zero: lag is expected — messages are waiting to retry. If Redis
+            is healthy: retry consumer may need scaling.
+              kubectl scale deployment event-consumer-retry --replicas=4 -n scalestyle
+            See RUNBOOK.md §5 for escalation guidance.
+
+  - name: event-consumer-features
+    rules:
+      # Critical: Category affinity failures indicate metadata schema mismatch.
+      # This directly impacts personalization quality — users get no category-based
+      # recommendations. Could be caused by missing "category" field in item metadata.
+      - alert: EventConsumerCategoryAffinityHighFailureRate
+        expr: rate(feature_failures_total{feature="category_affinity"}[5m]) > 0.01
+        for: 3m
+        labels:
+          severity: critical
+          component: event-consumer
+        annotations:
+          summary: "Category affinity feature experiencing high failure rate"
+          description: |
+            rate(feature_failures_total{feature="category_affinity"}[5m])={{ $value }}/s.
+            This indicates item metadata is missing the "category" field. Users will
+            not receive category-based personalization. Verify data-pipeline loader
+            is writing the "category" field to Redis item:{article_id}:meta.
+            Check a sample item:
+              redis-cli HGETALL item:12345:meta
+            Expected: "category" field should be populated with product_type_name.
+          runbook_url: "https://github.com/scalestyle/ScaleStyle/blob/main/event-consumer/RUNBOOK.md"

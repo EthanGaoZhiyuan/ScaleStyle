@@ -21,6 +21,14 @@ public class CommonApiResponse<T> {
         return new CommonApiResponse<>(ResultCode.SUCCESS.getCode(), ResultCode.SUCCESS.getMessage(), data);
     }
 
+    /**
+     * 202 Accepted for asynchronous endpoints where work was only admitted to a
+     * local processing attempt. Callers must not infer durability from this wrapper.
+     */
+    public static <T> CommonApiResponse<T> accepted(T data) {
+        return new CommonApiResponse<>(ResultCode.ACCEPTED.getCode(), ResultCode.ACCEPTED.getMessage(), data);
+    }
+
     // static helper method for error response
     public static <T> CommonApiResponse<T> error(int code, String message) {
         return new CommonApiResponse<>(code, message, null);

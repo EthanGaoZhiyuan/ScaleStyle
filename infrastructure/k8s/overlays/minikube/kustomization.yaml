@@ -9,12 +9,6 @@ resources:
   - inference-hpa.yaml
 
 # Minikube-specific patches
-patches:
-  - path: ingress-minikube.yaml
-  - path: resource-limits-small.yaml
-  - path: init-job-fast.yaml
-
-# Minikube uses hostPath for storage
 
 # Image configuration for Minikube
 # Replace 'your-dockerhub-username' with actual Docker Hub username
@@ -30,7 +24,11 @@ images:
     newName: your-dockerhub-username/scalestyle-data-init
     newTag: latest
 
-# Minikube-specific ConfigMap overrides
+patchesStrategicMerge:
+  - ingress-minikube.yaml
+  - resource-limits-small.yaml
+  - init-job-fast.yaml
+
 patches:
   - target:
       kind: ConfigMap
@@ -48,4 +46,10 @@ patches:
       - op: replace
         path: /data/INFERENCE_BASE_URL
         value: http://inference.scalestyle.svc.cluster.local:8000
+      - op: replace
+        path: /data/SPRING_KAFKA_BOOTSTRAP_SERVERS
+        value: kafka.scalestyle.svc.cluster.local:9092
+      - op: replace
+        path: /data/KAFKA_BOOTSTRAP_SERVERS
+        value: kafka.scalestyle.svc.cluster.local:9092
 

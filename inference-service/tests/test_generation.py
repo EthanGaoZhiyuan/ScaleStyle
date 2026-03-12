@@ -11,7 +11,7 @@ the Qwen2-1.5B-Instruct model (~3GB). To run these tests, set RUN_SLOW_TESTS=1:
 import pytest
 import asyncio
 import os
-from src.ray_serve.deployments.generation import GenerationDeployment
+from src.deployments.generation import GenerationDeployment
 
 # Skip all tests in this module by default (require model download)
 pytestmark = pytest.mark.skipif(

@@ -6,7 +6,7 @@ metadata:
   name: gateway
   namespace: scalestyle
 spec:
-  replicas: 3  # Start with 3 replicas for HA
+  replicas: 2
 
 ---
 apiVersion: apps/v1
@@ -15,28 +15,22 @@ metadata:
   name: inference
   namespace: scalestyle
 spec:
-  replicas: 2  # Start with 2 replicas
+  replicas: 2  # Fixed EKS pod count; Ray Serve scales only in-pod actors for inference.
 
 ---
-# Production HPA with higher limits
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: gateway-hpa
+  name: event-consumer-primary
   namespace: scalestyle
 spec:
-  minReplicas: 3
-  maxReplicas: 10
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
-  - type: Resource
-    resource:
-      name: memory
-      target:
-        type: Utilization
-        averageUtilization: 80
+  replicas: 2
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-consumer-retry
+  namespace: scalestyle
+spec:
+  replicas: 1

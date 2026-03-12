@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - kafka-cluster.yaml
+  - kafka-users.yaml
+  - kafka-network-policy.yaml
+  - topic-clicks.yaml
+  - topic-clicks-retry-1s.yaml
+  - topic-clicks-retry-10s.yaml
+  - topic-clicks-retry-60s.yaml
+  - topic-clicks-dlq.yaml

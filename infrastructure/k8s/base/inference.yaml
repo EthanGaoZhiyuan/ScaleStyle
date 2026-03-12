@@ -10,7 +10,6 @@ metadata:
     component: inference
     version: "1.0"
 spec:
-  replicas: 1
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -37,8 +36,13 @@ spec:
       
       containers:
       - name: inference
-        image: scalestyle-inference:local
-        imagePullPolicy: Never
+        # Base must never point at a deployable local/dev image. Every overlay
+        # is required to rewrite this placeholder via Kustomize images:.
+        image: scalestyle-inference:__MUST_BE_OVERRIDDEN_BY_KUSTOMIZE__
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: PROMETHEUS_MULTIPROC_DIR
+          value: /tmp/prometheus_multiproc
         
         ports:
         - name: http
@@ -56,6 +60,9 @@ spec:
         envFrom:
         - configMapRef:
             name: scalestyle-config
+        - configMapRef:
+            name: scalestyle-cloud-config
+            optional: true
         
         resources:
           requests:
@@ -65,14 +72,17 @@ spec:
             cpu: "4000m"
             memory: "8Gi"
         
+        # Startup uses /readyz, not /healthz, so the pod is not considered started
+        # until the service can actually serve model-backed traffic. This avoids
+        # a rollout declaring success while models are still cold-loading.
         startupProbe:
           httpGet:
-            path: /healthz
+            path: /readyz
             port: 8000
           initialDelaySeconds: 10
-          periodSeconds: 30
+          periodSeconds: 15
           timeoutSeconds: 10
-          failureThreshold: 30
+          failureThreshold: 40
         
         readinessProbe:
           httpGet:
@@ -92,15 +102,20 @@ spec:
           timeoutSeconds: 10
           failureThreshold: 3
         
-        # Volume mounts for HuggingFace cache (using emptyDir for local dev)
+        # Model/Hugging Face cache is PVC-backed so restarts and rolling updates
+        # reuse warmed artifacts instead of re-downloading them into emptyDir.
         volumeMounts:
         - name: hf-cache
           mountPath: /cache/huggingface
+        - name: prometheus-multiproc
+          mountPath: /tmp/prometheus_multiproc
       
       volumes:
       - name: hf-cache
-        emptyDir:
-          sizeLimit: 10Gi
+        persistentVolumeClaim:
+          claimName: inference-model-cache
+      - name: prometheus-multiproc
+        emptyDir: {}
 
 ---
 # Inference Service: ClusterIP for internal access

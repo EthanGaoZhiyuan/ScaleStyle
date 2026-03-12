@@ -1,0 +1,25 @@
+aws_region          = "ap-southeast-2"
+project_name        = "scalestyle"
+environment         = "production"
+cluster_name        = "scalestyle-eks"
+cluster_version     = "1.30"
+vpc_cidr            = "10.30.0.0/16"
+availability_zone_count = 2
+
+node_instance_types = ["t3.large"]
+node_min_size       = 1
+node_desired_size   = 2
+node_max_size       = 3
+node_disk_size      = 40
+redis_node_type     = "cache.t4g.small"
+redis_apply_immediately = false
+redis_preferred_maintenance_window = "sun:16:00-sun:18:00"
+redis_snapshot_window = "18:00-19:00"
+redis_snapshot_retention_limit = 7
+redis_auto_minor_version_upgrade = true
+
+# Set this if you want a fixed bucket name. Leave commented out to auto-generate.
+# artifacts_bucket_name = "scalestyle-production-assets-yourname"
+
+# For fast non-prod iteration only, you may override:
+# redis_apply_immediately = true

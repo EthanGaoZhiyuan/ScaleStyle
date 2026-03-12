@@ -10,6 +10,7 @@ metadata:
     app: scalestyle
     component: config
 data:
+  ENVIRONMENT: "local"
   # ==========================================
   # Redis Configuration
   # ==========================================
@@ -19,6 +20,7 @@ data:
   REDIS_POOL_SIZE: "10"
   REDIS_SOCKET_TIMEOUT: "5"
   REDIS_SOCKET_CONNECT_TIMEOUT: "5"
+  REDIS_RETRY_ON_TIMEOUT: "false"
 
   # ==========================================
   # Milvus Configuration
@@ -26,6 +28,7 @@ data:
   MILVUS_HOST: "milvus"
   MILVUS_PORT: "19530"
   MILVUS_COLLECTION: "scale_style_bge_v2"
+  MILVUS_IMAGE_COLLECTION: "scalestyle_image_v1"
   MILVUS_BATCH_SIZE: "100"
   MILVUS_TIMEOUT: "30"
 
@@ -35,6 +38,7 @@ data:
   GENERATION_ENABLED: "1"
   GENERATION_MODE: "template"  # template or llm
   GENERATION_MODEL: "Qwen/Qwen2-1.5B-Instruct"
+  GENERATION_REVISION: "ba1cf1846d7df0a0591d6c00649f57e798519da8"
   GENERATION_DEVICE: "cpu"
   GENERATION_MAX_NEW_TOKENS: "48"
   GENERATION_TEMPERATURE: "0.2"
@@ -49,6 +53,15 @@ data:
   RAY_SERVE_PORT: "8000"
   RAY_SERVE_HOST: "0.0.0.0"
   RAY_DASHBOARD_PORT: "8265"
+  
+  # Ray memory configuration (aligned with container limits)
+  # Formula: memory_limit >= RAY_MEMORY_GB + RAY_OBJECT_STORE_GB + model_weights + 1GB_overhead
+  # Model weights at startup (CPU): BGE-large ~1.3 GB + cross-encoder ~90 MB
+  # Production (no generation): 5.0 + 1.0 + 1.3 + 0.09 + 0.5 ≈ 7.9 GB → 8Gi limit (EKS overlay)
+  # To enable generation (Qwen2-1.5B ~3 GB): set RAY_MEMORY_GB=6, RAY_OBJECT_STORE_GB=1
+  #   and increase container memory limit to 12Gi
+  RAY_MEMORY_GB: "5.0"
+  RAY_OBJECT_STORE_GB: "1.0"
 
   # ==========================================
   # Gateway Configuration
@@ -56,6 +69,37 @@ data:
   GATEWAY_PORT: "8080"
   # Fix: Must match Gateway's application.properties (INFERENCE_BASE_URL)
   INFERENCE_BASE_URL: "http://inference:8000"
+
+  # Kafka bootstrap — intentionally set to the Strimzi in-cluster FQDN as the
+  # base default.  This value is safe for any pod running inside the EKS cluster.
+  # The EKS overlay's apply-cloud-config.sh MUST override both keys with the
+  # actual broker endpoint at deploy time (it already does this via
+  # scalestyle-cloud-config ConfigMap).
+  #
+  # Why NOT "localhost:9092":
+  #   A pod that gets this base value without the cloud-config override would
+  #   silently try to connect to its own loopback address, drop all events, and
+  #   produce no error visible at the API layer.  The Strimzi FQDN fails with a
+  #   clear DNS/connection error instead, making misconfiguration immediately
+  #   visible in pod logs and readiness probes.
+  #
+  # Why NOT a blank/"UNSET" sentinel:
+  #   Spring Boot and the Python consumer both require a non-empty value at
+  #   startup; a blank string causes an immediate startup crash rather than a
+  #   helpful error message.
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: "scalestyle-kafka-kafka-bootstrap.kafka-system.svc.cluster.local:9093"
+  KAFKA_BOOTSTRAP_SERVERS: "scalestyle-kafka-kafka-bootstrap.kafka-system.svc.cluster.local:9093"
+  KAFKA_SECURITY_PROTOCOL: "SASL_SSL"
+  KAFKA_SASL_MECHANISM: "SCRAM-SHA-512"
+  KAFKA_POLL_MAX_RECORDS: "100"
+  KAFKA_TOPIC: "scalestyle.clicks"
+  KAFKA_RETRY_TOPIC_1S: "scalestyle.clicks.retry.1s"
+  KAFKA_RETRY_TOPIC_10S: "scalestyle.clicks.retry.10s"
+  KAFKA_RETRY_TOPIC_60S: "scalestyle.clicks.retry.60s"
+  # RETRY_ENFORCE_DELAY must stay enabled in standard deployments so retry tier
+  # names correspond to real elapsed delay before the next attempt.
+  RETRY_ENFORCE_DELAY: "true"
+  KAFKA_GROUP_ID: "event-consumer"
   
   # Fix: HTTP client factory for Ray Serve compatibility
   SPRING_HTTP_CLIENT_FACTORY: "simple"
@@ -72,12 +116,15 @@ data:
   
   # Prometheus metrics
   PROMETHEUS_PUSHGATEWAY: "http://prometheus-pushgateway:9091"
+  VISION_ENABLED: "1"
 
   # ==========================================
   # Performance Tuning
   # ==========================================
   JAVA_OPTS: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
   
-  # Fix: Standardize HF cache path (matches inference Dockerfile)
+  # Standardize HF cache path (matches inference Dockerfile and mounted PVC path
+  # in the standard Deployment; Ray autoscaling overlay expects the same path to
+  # exist pre-baked in the image).
   HF_HOME: "/cache/huggingface"
   TRANSFORMERS_CACHE: "/cache/huggingface/hub"
