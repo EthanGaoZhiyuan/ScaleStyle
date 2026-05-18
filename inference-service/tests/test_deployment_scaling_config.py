@@ -111,23 +111,9 @@ _stub(
     personalization_fallback_active=MagicMock(),
     personalization_request_mode_total=MagicMock(),
 )
-_stub(
-    "src.deployments.multimodal",
-    merge_ranked_candidates=lambda *a, **kw: [],
-    fuse_with_normalized_scores=lambda *a, **kw: [],
-    apply_behavior_boost_to_hybrid_results=lambda *a, **kw: None,
-)
-
-# Stub sub-deployments ingress imports — but NOT embedding/retrieval/reranker/vision,
-# since TestDeploymentOptions imports the real modules to verify their options dicts.
-# Those real imports work because torch/transformers/pymilvus/ray stubs are already set above.
-for _dname, _sym in {
-    "src.deployments.router": "RouterDeployment",
-    "src.deployments.popularity": "PopularityDeployment",
-    "src.deployments.generation": "GenerationDeployment",
-}.items():
-    _m = _stub(_dname)
-    setattr(_m, _sym, object)
+# src.deployments.multimodal is only needed if ingress is imported; this file's
+# TestDeploymentOptions tests import embedding/retrieval/reranker/vision directly
+# (not ingress), so no sub-deployment stubs are needed here.
 
 
 # ---------------------------------------------------------------------------

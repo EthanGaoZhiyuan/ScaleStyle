@@ -140,7 +140,7 @@ class TestVisionToThreadDelegation:
     """
 
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_search_by_image_uses_to_thread(self):
         vision = _make_vision()
@@ -207,7 +207,7 @@ class TestVisionToThreadDelegation:
 
 class TestVisionCallRouting:
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def _make_sentinel(self, mode: str) -> dict:
         return {"items": [], "status": "success", "mode": mode, "query_time_ms": 1.0}
@@ -293,6 +293,6 @@ class TestVisionConcurrency:
                 )
             return results
 
-        results = asyncio.get_event_loop().run_until_complete(run())
+        results = asyncio.run(run())
         assert len(results) == 2
         assert call_count["n"] == 2

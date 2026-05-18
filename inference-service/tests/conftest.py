@@ -59,6 +59,19 @@ sys.modules["ray.serve.handle"] = ray_serve_handle_mock
 ray_mock.serve = ray_serve_mock
 ray_serve_mock.handle = ray_serve_handle_mock
 
+# Pre-load real packages BEFORE any test file is collected.
+# test_deployment_scaling_config.py uses sys.modules.setdefault() to stub these;
+# pre-loading here means setdefault() finds them already present and skips the stub.
+# src.utils.redis_client must be imported as a proper submodule so monkeypatch.setattr
+# with the dotted-string form can resolve src.utils.redis_client.RedisClient.get_client.
+import fastapi  # noqa: E402, F401
+import fastapi.responses  # noqa: E402, F401
+import starlette.requests  # noqa: E402, F401
+import numpy  # noqa: E402, F401
+import src.utils.redis_client  # noqa: E402, F401
+import src.personalization  # noqa: E402, F401
+import src.personalization.metrics  # noqa: E402, F401
+
 # Mock opentelemetry instrumentation (used by ingress; avoids missing optional dep in tests)
 sys.modules["opentelemetry.instrumentation"] = MagicMock()
 sys.modules["opentelemetry.instrumentation.fastapi"] = MagicMock()

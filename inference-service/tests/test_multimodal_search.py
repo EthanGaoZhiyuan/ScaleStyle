@@ -5,8 +5,17 @@ from contextlib import nullcontext
 
 from tests.utils import FakeHandle
 
+# ---------------------------------------------------------------------------
+# Module-level shims: only opentelemetry / utils / personalization.
+# Deployment class stubs (router, retrieval, etc.) are NOT installed here
+# because they would pollute sys.modules for the whole test session and break
+# test_deployment_scaling_config.py::TestDeploymentOptions which needs to
+# import the real deployment classes.
+# ---------------------------------------------------------------------------
 
-def _install_ingress_import_shims() -> None:
+
+def _install_ingress_infra_shims() -> None:
+    """Install opentelemetry, observability, metrics, personalization stubs."""
     tracecontext_module = types.ModuleType(
         "opentelemetry.trace.propagation.tracecontext"
     )
@@ -36,14 +45,6 @@ def _install_ingress_import_shims() -> None:
     metrics_module = types.ModuleType("src.utils.metrics")
     personalization_module = types.ModuleType("src.personalization")
     personalization_metrics_module = types.ModuleType("src.personalization.metrics")
-    deployment_stub_names = {
-        "src.deployments.router": "RouterDeployment",
-        "src.deployments.embedding": "EmbeddingDeployment",
-        "src.deployments.retrieval": "RetrievalDeployment",
-        "src.deployments.popularity": "PopularityDeployment",
-        "src.deployments.reranker": "RerankerDeployment",
-        "src.deployments.generation": "GenerationDeployment",
-    }
 
     class DummyTracer:
         def start_as_current_span(self, *_args, **_kwargs):
@@ -89,13 +90,29 @@ def _install_ingress_import_shims() -> None:
     sys.modules.setdefault(
         "src.personalization.metrics", personalization_metrics_module
     )
-    for module_name, symbol_name in deployment_stub_names.items():
+
+
+_install_ingress_infra_shims()
+
+
+def _install_deployment_class_stubs(monkeypatch) -> None:
+    """
+    Install lightweight deployment class stubs using monkeypatch so they are
+    automatically removed after the test.  These stubs satisfy ingress.py's
+    imports of sub-deployment classes without needing the real heavy modules.
+    """
+    _stub_names = {
+        "src.deployments.router": "RouterDeployment",
+        "src.deployments.embedding": "EmbeddingDeployment",
+        "src.deployments.retrieval": "RetrievalDeployment",
+        "src.deployments.popularity": "PopularityDeployment",
+        "src.deployments.reranker": "RerankerDeployment",
+        "src.deployments.generation": "GenerationDeployment",
+    }
+    for module_name, symbol_name in _stub_names.items():
         module = types.ModuleType(module_name)
         setattr(module, symbol_name, object)
-        sys.modules.setdefault(module_name, module)
-
-
-_install_ingress_import_shims()
+        monkeypatch.setitem(sys.modules, module_name, module)
 
 
 class FakeRequest:
@@ -107,6 +124,16 @@ class FakeRequest:
 
 
 def test_multimodal_handler_uses_dual_recall_merge_rerank(monkeypatch):
+    # Install deployment class stubs with monkeypatch so they are cleaned up
+    # after this test and do not leak into test_deployment_scaling_config.py.
+    _install_deployment_class_stubs(monkeypatch)
+
+    # Remove any stale stub for multimodal installed at collection time by
+    # test_deployment_scaling_config.py so ingress.py gets the real functions.
+    monkeypatch.delitem(sys.modules, "src.deployments.multimodal", raising=False)
+    # Force fresh import of ingress so it picks up the real multimodal above.
+    monkeypatch.delitem(sys.modules, "src.deployments.ingress", raising=False)
+
     class DummyRedis:
         def ping(self):
             return True
@@ -216,13 +243,21 @@ def test_multimodal_handler_uses_dual_recall_merge_rerank(monkeypatch):
     assert payload["mode"] == "multimodal"
     assert payload["architecture"] == "dual_recall_merge_rerank"
     assert len(payload["items"]) == 3
-    merged_item = next(item for item in payload["items"] if item["article_id"] == "b")
-    assert sorted(merged_item["candidate_sources"]) == ["image", "text"]
+    # Production DTO uses camelCase keys: itemId (zero-padded) and candidateSources.
+    # "b".zfill(10) == "000000000b" after _contract_normalize pads short ids.
+    merged_item = next(
+        item for item in payload["items"] if item["itemId"] == "000000000b"
+    )
+    assert sorted(merged_item["candidateSources"]) == ["image", "text"]
     assert calls == {"text": 1, "image": 1, "rerank": 1}
     assert payload["debug"]["multimodal"]["merged_candidates"] == 3
 
 
-def test_merge_ranked_candidates_dedupes_and_tracks_sources():
+def test_merge_ranked_candidates_dedupes_and_tracks_sources(monkeypatch):
+    # Remove any stub installed at collection time by test_deployment_scaling_config.py
+    # so we import the real merge_ranked_candidates implementation.
+    monkeypatch.delitem(sys.modules, "src.deployments.multimodal", raising=False)
+
     from src.deployments.multimodal import merge_ranked_candidates
 
     merged = merge_ranked_candidates(
