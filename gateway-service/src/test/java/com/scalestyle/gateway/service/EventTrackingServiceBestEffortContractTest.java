@@ -180,7 +180,7 @@ class EventTrackingServiceBestEffortContractTest {
 
     @Test
     void trackClick_acceptsAllDefinedValidSources() {
-        List.of("search", "browse", "recommendation", "image_search").forEach(src -> {
+        List.of("search", "browse", "recommendation", "image_search", "hybrid_search").forEach(src -> {
             TrackClickRequest req = TrackClickRequest.builder()
                     .userId("user-1").itemId("item-2").source(src).build();
             when(eventTrackingAttemptMetrics.isKafkaSendBlocked()).thenReturn(false);

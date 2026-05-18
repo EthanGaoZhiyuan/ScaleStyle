@@ -7,6 +7,7 @@ import com.scalestyle.gateway.dto.ImageSearchResponse;
 import com.scalestyle.gateway.dto.RecommendationDTO;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import com.scalestyle.gateway.service.RecommendationMetrics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -92,7 +93,7 @@ class ImageSearchFallbackTest {
                 Runnable::run,   // cacheExecutor     (synchronous in tests)
                 popularItemsTemplate,
                 CircuitBreakerRegistry.ofDefaults(),
-                new SimpleMeterRegistry()
+                new RecommendationMetrics(new SimpleMeterRegistry())
         );
     }
 

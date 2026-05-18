@@ -8,6 +8,7 @@ import com.scalestyle.gateway.dto.RecommendationDTO;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import com.scalestyle.gateway.service.RecommendationMetrics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -114,7 +115,7 @@ class RecommendationServiceCacheTest {
                 Runnable::run,   // cacheExecutor
                 popularItemsTemplate,
                 CircuitBreakerRegistry.ofDefaults(),
-                meterRegistry
+                new RecommendationMetrics(meterRegistry)
         );
     }
 
@@ -148,12 +149,37 @@ class RecommendationServiceCacheTest {
                 .thenReturn(new LinkedHashSet<>(List.of(ids)));
     }
 
+    private void stubGlobalPopularItems(String... ids) {
+        when(zSetOperations.reverseRange(eq("global:popular"), anyLong(), anyLong()))
+                .thenReturn(new LinkedHashSet<>(List.of(ids)));
+    }
+
     /**
      * Regression: Inference timeout maps to INFERENCE_TIMEOUT degradation reason.
      */
     private void stubInferenceTimeout() {
         when(responseSpec.bodyToMono(InferenceSearchResponse.class))
                 .thenReturn(Mono.error(new TimeoutException("Request timed out")));
+    }
+
+    // ── OTel null-context safety ──────────────────────────────────────────────
+
+    @Test
+    @DisplayName("searchAsync fallback completes normally when no OTel span is active")
+    void searchAsync_noActiveOtelSpan_fallbackCompletesCleanly() {
+        // Guards against OTel null-context NPE (agent 2.2.0 bug: getOpenTelemetryContext
+        // returns null when Reactor subscriber context has no OTel key after subscribeOn
+        // thread switch). contextCapture() + agent upgrade to 2.4.0 are the fixes;
+        // this test pins the expectation that the fallback path completes without exception
+        // regardless of whether an active OTel span is present.
+        stubInferenceFailure();
+        stubPopularItems("pop1", "pop2", "pop3");
+
+        List<RecommendationDTO> results =
+                service.searchAsync("blue dress", null, "search", 5, false).join();
+
+        assertThat(results).isNotEmpty();
+        assertThat(results).allMatch(r -> r.getItemId() != null);
     }
 
     // ── Missing metadata filtering ────────────────────────────────────────────
@@ -375,13 +401,35 @@ class RecommendationServiceCacheTest {
     // ── Windowed fallback failure paths ─────────────────────────────────────────
 
     @Test
-    @DisplayName("Both 24h and 7d popularity windows empty returns empty list without exception")
-    void fallbackPopularity_bothWindowsEmpty_returnsEmptyList() {
+    @DisplayName("Both materialized windows empty: falls back to global:popular (tier 3)")
+    void fallbackPopularity_bothWindowsEmpty_usesGlobalPopularFallback() {
         stubInferenceFailure();
         when(valueOperations.get(anyString())).thenReturn(null);
         when(zSetOperations.reverseRange(argThat(key -> key != null && key.startsWith("popularity:materialized:24h:")), anyLong(), anyLong()))
                 .thenReturn(new LinkedHashSet<>());
         when(zSetOperations.reverseRange(argThat(key -> key != null && key.startsWith("popularity:materialized:7d:")), anyLong(), anyLong()))
+                .thenReturn(new LinkedHashSet<>());
+        stubGlobalPopularItems("global1", "global2");
+
+        List<RecommendationDTO> results =
+                service.searchAsync("red dress", null, "search", 5, false).join();
+
+        assertThat(results).isNotEmpty();
+        assertThat(results.get(0).getSource()).isEqualTo("global-popular-fallback");
+        assertThat(results.get(0).isDegraded()).isTrue();
+        verify(zSetOperations, atLeastOnce()).reverseRange(eq("global:popular"), anyLong(), anyLong());
+    }
+
+    @Test
+    @DisplayName("All three fallback tiers empty: returns empty list without exception")
+    void fallbackPopularity_allTiersEmpty_returnsEmptyList() {
+        stubInferenceFailure();
+        when(valueOperations.get(anyString())).thenReturn(null);
+        when(zSetOperations.reverseRange(argThat(key -> key != null && key.startsWith("popularity:materialized:24h:")), anyLong(), anyLong()))
+                .thenReturn(new LinkedHashSet<>());
+        when(zSetOperations.reverseRange(argThat(key -> key != null && key.startsWith("popularity:materialized:7d:")), anyLong(), anyLong()))
+                .thenReturn(new LinkedHashSet<>());
+        when(zSetOperations.reverseRange(eq("global:popular"), anyLong(), anyLong()))
                 .thenReturn(new LinkedHashSet<>());
 
         List<RecommendationDTO> results =

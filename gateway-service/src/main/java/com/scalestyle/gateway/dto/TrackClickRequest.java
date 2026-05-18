@@ -43,7 +43,7 @@ public class TrackClickRequest {
     private String sessionId;
 
     @NotBlank(message = "source is required")
-    @Pattern(regexp = EventSource.ALLOWED_PATTERN, message = "source must be one of: search, browse, recommendation, image_search")
+    @Pattern(regexp = EventSource.ALLOWED_PATTERN, message = "source must be one of: search, browse, recommendation, image_search, hybrid_search")
     @JsonProperty("source")
     private String source;
 

@@ -44,10 +44,11 @@ WORKDIR /app
 # 5. Copy JAR from builder
 COPY --from=builder /app/build/libs/*.jar app.jar
 
-# 6. Copy OpenTelemetry Java Agent (pre-downloaded for supply chain security)
-# Version: v2.2.0
-# SHA256: 7d12c02ef4f6c0063bc231d8ac3d1b7f8fe4861d1ee7a92b04fbdaa6fa3cf675
-COPY --chmod=644 opentelemetry-javaagent.jar /app/opentelemetry-javaagent.jar
+# 6. Download OpenTelemetry Java Agent at build time (no pre-downloaded file required)
+ARG OTEL_AGENT_VERSION=2.4.0
+RUN curl -fsSL -o /app/opentelemetry-javaagent.jar \
+    "https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v${OTEL_AGENT_VERSION}/opentelemetry-javaagent.jar" \
+    && chmod 644 /app/opentelemetry-javaagent.jar
 
 # 7. Create non-root user for security (production best practice)
 RUN addgroup -S scalestyle && adduser -S scalestyle -G scalestyle && \

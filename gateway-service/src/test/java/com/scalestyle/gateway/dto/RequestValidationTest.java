@@ -103,6 +103,20 @@ class RequestValidationTest {
     }
 
     @Test
+    @DisplayName("TrackClickRequest: hybrid_search source should pass")
+    void testTrackClickRequest_HybridSearchSource() {
+        TrackClickRequest request = TrackClickRequest.builder()
+                .userId("user-123")
+                .itemId("item-456")
+                .sessionId("session-789")
+                .source("hybrid_search")
+                .build();
+
+        Set<ConstraintViolation<TrackClickRequest>> violations = validator.validate(request);
+        assertTrue(violations.isEmpty(), "hybrid_search is a valid source and should pass DTO validation");
+    }
+
+    @Test
     @DisplayName("TrackClickRequest: unknown source should fail")
     void testTrackClickRequest_UnknownSourceRejected() {
         TrackClickRequest request = TrackClickRequest.builder()

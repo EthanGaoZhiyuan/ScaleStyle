@@ -40,10 +40,10 @@ public class InferenceClientConfig {
      *   - Beyond capacity: immediate RejectedExecutionException → fallback path
      * 
      * TIMEOUT ENFORCEMENT:
-     *   Per-request maximum duration: 450ms (Netty responseTimeout) - hard kill
-     *   - 350ms: Application-level timeout (Mono.timeout)
-     *   - 450ms: Netty socket-level timeout (HARD KILL)
-     *   - Whichever fires first terminates the request; I/O is always cancelled
+     *   Per-request maximum duration: 700ms (Netty responseTimeout) - hard kill
+     *   - 600ms: Application-level timeout (Mono.timeout in RecommendationService)
+     *   - 700ms: Netty socket-level timeout (HARD KILL)
+     *   - Reactor timeout fires first, triggering fallback; Netty cancels I/O
      * 
      * FAIL-FAST BEHAVIOR:
      *   - AbortPolicy: throws exception immediately when queue is full
@@ -60,7 +60,7 @@ public class InferenceClientConfig {
      * When Ray inference is down or slow:
      * - Maximum threads occupied: 64 (0.32% of system with 200 Tomcat threads)
      * - Maximum queued requests: 100
-     * - Maximum duration per request: 450ms
+     * - Maximum duration per request: 700ms
      * - 165th+ concurrent request: Immediate rejection → Redis fallback
      * - Circuit breaker opens at: 50% failure rate (5 of 10 calls)
      */
@@ -100,9 +100,9 @@ public class InferenceClientConfig {
      *
      * === TIMEOUT LAYERS (Defense in Depth) ===
      * 1. Connect timeout (1000ms): TCP handshake
-     * 2. Read timeout (450ms): First byte after request sent (Netty hard kill)
-     * 3. Response timeout (450ms): Total time from request to full response
-     * 4. Application timeout (350ms in RecommendationService): business deadline
+     * 2. Read timeout (700ms): First byte after request sent (Netty hard kill)
+     * 3. Response timeout (700ms): Total time from request to full response
+     * 4. Application timeout (600ms in RecommendationService): business deadline
      *
      * Note: there is NO connection-acquire timeout layer. Connection acquisition
      * either succeeds immediately or fails immediately (see backpressure model below).
