@@ -18,8 +18,11 @@ data:
   REDIS_PORT: "6379"
   REDIS_DB: "0"
   REDIS_POOL_SIZE: "10"
-  REDIS_SOCKET_TIMEOUT: "5"
-  REDIS_SOCKET_CONNECT_TIMEOUT: "5"
+  # REDIS_CONNECT_TIMEOUT_MS / REDIS_SOCKET_TIMEOUT_MS: read by inference-service
+  # (RedisConfig in config.py). The event-consumer reads REDIS_SOCKET_CONNECT_TIMEOUT /
+  # REDIS_SOCKET_TIMEOUT (seconds) and overrides both per-deployment with 0.5 s.
+  REDIS_CONNECT_TIMEOUT_MS: "150"
+  REDIS_SOCKET_TIMEOUT_MS: "150"
   REDIS_RETRY_ON_TIMEOUT: "false"
 
   # ==========================================
@@ -27,15 +30,15 @@ data:
   # ==========================================
   MILVUS_HOST: "milvus"
   MILVUS_PORT: "19530"
-  MILVUS_COLLECTION: "scale_style_bge_v2"
-  MILVUS_IMAGE_COLLECTION: "scalestyle_image_v1"
+  MILVUS_COLLECTION: "scale_style_bge_small_v1_5"
+  MILVUS_IMAGE_COLLECTION: "scale_style_clip_image_v1"
   MILVUS_BATCH_SIZE: "100"
   MILVUS_TIMEOUT: "30"
 
   # ==========================================
   # Generation Configuration (LLM)
   # ==========================================
-  GENERATION_ENABLED: "1"
+  GENERATION_ENABLED: "0"
   GENERATION_MODE: "template"  # template or llm
   GENERATION_MODEL: "Qwen/Qwen2-1.5B-Instruct"
   GENERATION_REVISION: "ba1cf1846d7df0a0591d6c00649f57e798519da8"
@@ -56,8 +59,8 @@ data:
   
   # Ray memory configuration (aligned with container limits)
   # Formula: memory_limit >= RAY_MEMORY_GB + RAY_OBJECT_STORE_GB + model_weights + 1GB_overhead
-  # Model weights at startup (CPU): BGE-large ~1.3 GB + cross-encoder ~90 MB
-  # Production (no generation): 5.0 + 1.0 + 1.3 + 0.09 + 0.5 ≈ 7.9 GB → 8Gi limit (EKS overlay)
+  # Model weights at startup (CPU): BGE-small ~134 MB + cross-encoder ~90 MB
+  # Production (no generation): 5.0 + 1.0 + 0.13 + 0.09 + 0.5 ≈ 6.7 GB → 8Gi limit (EKS overlay)
   # To enable generation (Qwen2-1.5B ~3 GB): set RAY_MEMORY_GB=6, RAY_OBJECT_STORE_GB=1
   #   and increase container memory limit to 12Gi
   RAY_MEMORY_GB: "5.0"
@@ -99,8 +102,14 @@ data:
   # RETRY_ENFORCE_DELAY must stay enabled in standard deployments so retry tier
   # names correspond to real elapsed delay before the next attempt.
   RETRY_ENFORCE_DELAY: "true"
-  KAFKA_GROUP_ID: "event-consumer"
-  
+  # KAFKA_GROUP_ID is intentionally absent from the shared ConfigMap.
+  # Each consumer deployment sets it as a direct env: override:
+  #   event-consumer-primary  → scalestyle-click-main
+  #   event-consumer-retry    → scalestyle-click-retry
+  # A shared value here would be overridden by per-deployment env: entries (env:
+  # wins over envFrom:), but removing it entirely makes the intent unambiguous and
+  # prevents confusion if a future deployment accidentally omits the override.
+
   # Fix: HTTP client factory for Ray Serve compatibility
   SPRING_HTTP_CLIENT_FACTORY: "simple"
   
@@ -128,3 +137,43 @@ data:
   # exist pre-baked in the image).
   HF_HOME: "/cache/huggingface"
   TRANSFORMERS_CACHE: "/cache/huggingface/hub"
+
+  # ==========================================
+  # Embedding Configuration
+  # ==========================================
+  EMBEDDING_MODEL: "BAAI/bge-small-en-v1.5"
+  EXPECTED_EMBEDDING_DIM: "384"
+
+  # ==========================================
+  # Per-Stage Inference Timeout Budget
+  # ==========================================
+  # Matches docker-compose validated values. Sum (200+150+120+50+50=570 ms) fits
+  # inside the 600 ms Reactor deadline in the Spring WebFlux gateway.
+  EMBEDDING_TIMEOUT_MS: "200"
+  RETRIEVAL_TIMEOUT_MS: "150"
+  RERANKER_TIMEOUT_MS: "120"
+  GENERATION_TIMEOUT_MS: "50"
+  PERSONALIZATION_TIMEOUT_MS: "50"
+
+  # ==========================================
+  # Ray Serve Deployment Concurrency
+  # ==========================================
+  # VISION_MAX_ONGOING_REQUESTS raised 4→8 after local scaling experiment
+  # (see docs/performance/local-performance-current.md). Others match code
+  # defaults but are listed here to make them explicit and configmap-managed.
+  EMBEDDING_MAX_ONGOING_REQUESTS: "4"
+  RETRIEVAL_MAX_ONGOING_REQUESTS: "20"
+  RERANKER_MAX_ONGOING_REQUESTS: "6"
+  INGRESS_MAX_ONGOING_REQUESTS: "50"
+  VISION_MAX_ONGOING_REQUESTS: "8"
+
+  # ==========================================
+  # Reranker Configuration
+  # ==========================================
+  # RERANKER_MODEL matches docker-compose validated value. The code default
+  # (cross-encoder/ms-marco-MiniLM-L-6-v2) differs — set explicitly to avoid
+  # loading a different model than what was benchmarked.
+  RERANKER_MODEL: "BAAI/bge-reranker-base"
+  RERANKER_DEVICE: "cpu"
+  RERANKER_BATCH_SIZE: "32"
+  RERANKER_MAX_DOCS: "100"

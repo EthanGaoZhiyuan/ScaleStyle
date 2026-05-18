@@ -82,9 +82,9 @@ spec:
         - configMapRef:
             name: scalestyle-config
         - configMapRef:
-          name: scalestyle-cloud-config
-          optional: true
-        
+            name: scalestyle-cloud-config
+            optional: true
+
         # Resource limits
         resources:
           requests:

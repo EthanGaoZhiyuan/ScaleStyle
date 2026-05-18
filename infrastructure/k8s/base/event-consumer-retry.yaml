@@ -49,6 +49,10 @@ spec:
         env:
         - name: CONSUMER_MODE
           value: "retry"
+        # Per-deployment group ID — takes precedence over configmap and scalestyle-cloud-config.
+        # Must be distinct from the primary consumer group to prevent partition-assignment collision.
+        - name: KAFKA_GROUP_ID
+          value: "scalestyle-click-retry"
         # Same REDIS_SOCKET_TIMEOUT override as event-consumer-primary — see that
         # deployment for the full rationale.
         - name: REDIS_SOCKET_TIMEOUT

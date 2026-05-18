@@ -110,14 +110,16 @@ spec:
               name: scalestyle-config
           
           # Resources
+          # 8Gi limit required: BGE-small (~134MB) + bge-reranker-base (~90MB) +
+          # CLIP ViT-B/32 (openai/clip-vit-base-patch32, ~0.6GB) + Ray object store (1GB) + overhead.
           resources:
             limits:
               cpu: "2"
-              memory: "4Gi"
+              memory: "8Gi"
             requests:
               cpu: "500m"
-              memory: "1Gi"
-          
+              memory: "2Gi"
+
           # Production cache strategy for autoscaled Ray pods:
           # model artifacts must be pre-baked into the inference image.
 
@@ -178,11 +180,22 @@ spec:
   # Ray Serve configuration
   # Note: This RayService spec is for advanced autoscaling (optional)
   # For basic deployment, use standard Deployment (30-inference.yaml)
+  # serveConfigV2 is EXPERIMENTAL / PLACEHOLDER — do not use for production deploys.
+  # The standard inference Deployment (base/inference.yaml) is the validated path.
+  # Known issues with this block:
+  #   - import_path points to a non-existent module (src.ray_serve.deployments.ingress).
+  #     Actual module is src.deployments.ingress; no top-level ingress_app factory exists.
+  #   - PopularityDeployment and GenerationDeployment are not exported from ingress.py.
+  #     Remove GENERATION_ENABLED from serveConfigV2 env_vars if GenerationDeployment
+  #     is excluded.
+  # To use KubeRay in production: verify import_path against the actual Ray Serve
+  # app factory, then remove this comment block.
   serveConfigV2: |
     applications:
     - name: scalestyle
       route_prefix: /
-      # Fixed: Points to actual IngressDeployment.bind() in ingress.py:1189
+      # PLACEHOLDER: update import_path to match the actual Ray Serve app factory
+      # before deploying. Actual module: src.deployments.ingress (no ingress_app export).
       import_path: src.ray_serve.deployments.ingress:ingress_app
       runtime_env:
         working_dir: "."
@@ -197,3 +210,4 @@ spec:
       - name: PopularityDeployment
       - name: GenerationDeployment
       - name: RerankerDeployment
+      - name: VisionDeployment

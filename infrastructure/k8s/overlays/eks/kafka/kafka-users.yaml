@@ -90,7 +90,7 @@ spec:
         operation: Describe
       - resource:
           type: group
-          name: event-consumer-primary
+          name: scalestyle-click-main
           patternType: literal
         operation: Read
 ---
@@ -173,6 +173,6 @@ spec:
         operation: Describe
       - resource:
           type: group
-          name: event-consumer-retry
+          name: scalestyle-click-retry
           patternType: literal
         operation: Read

@@ -11,54 +11,31 @@ resources:
   - storage-class-ebs.yaml
   - storage-class-efs.yaml
 
-# EKS-specific patches
-patchesStrategicMerge:
-  - inference-model-cache-pvc.yaml
-  - resource-limits-production.yaml
-  - replicas-production.yaml
-  - init-job-full.yaml  # Full init (load Milvus)
-  - delete-hpa.yaml
-  - delete-redis.yaml
-  - delete-ingress.yaml
-  - configmap-patch.yaml  # Disable generation to fit 4Gi memory limit
-
-# ECR image references.
-#
-# newName  — injected by sync-ecr-images.sh from Terraform outputs at deploy time.
-# newTag   — injected by sync-ecr-images.sh from the IMAGE_TAG env variable.
-#            IMAGE_TAG MUST be an immutable, content-addressed tag (e.g. "git-3f8c9ab").
-#            "latest" is NEVER a valid value here: it breaks rollback auditability and
-#            can silently produce divergent images across nodes with imagePullPolicy:
-#            IfNotPresent.
-#
-# To build and push: IMAGE_TAG=git-$(git rev-parse --short HEAD) ./build-push-ecr.sh
-# To deploy:        IMAGE_TAG=git-$(git rev-parse --short HEAD) ./deploy-production.sh
-images:
-  - name: scalestyle-gateway
-    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/gateway-service
-    newTag: "git-COMMIT_SHA"
-  - name: scalestyle-inference
-    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/inference-service
-    newTag: "git-COMMIT_SHA"
-  - name: scalestyle-data-init
-    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/data-init
-    newTag: "git-COMMIT_SHA"
-  - name: scalestyle-event-consumer
-    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/event-consumer
-    newTag: "git-COMMIT_SHA"
-
-# EKS-specific config overrides.
-# Cloud endpoints (Redis, Kafka, S3 …) are injected at deploy time by
-# apply-cloud-config.sh into the scalestyle-cloud-config ConfigMap, which is
-# mounted AFTER scalestyle-config in every pod's envFrom — its values win on
-# conflict.  Keep this patch and apply-cloud-config.sh in sync on any key that
-# both touch.
+# All patches in a single patches: block (kustomize v5+).
+# File-based entries use strategic merge patch semantics.
+# Inline entries use JSON Patch (RFC 6902) semantics.
 patches:
+  # ── Strategic merge patches (file-based) ──────────────────────────────────
+  - path: inference-model-cache-pvc.yaml
+  - path: resource-limits-production.yaml
+  - path: replicas-production.yaml
+  - path: init-job-full.yaml
+  - path: delete-hpa.yaml
+  - path: delete-redis.yaml
+  - path: delete-ingress.yaml
+  - path: configmap-patch.yaml  # Disable generation; reduce Ray memory for 8Gi limit
+
+  # ── JSON Patch (inline) ────────────────────────────────────────────────────
+  # Cloud endpoints (Redis, Kafka, S3 …) are injected at deploy time by
+  # apply-cloud-config.sh into the scalestyle-cloud-config ConfigMap, which is
+  # mounted AFTER scalestyle-config in every pod's envFrom — its values win on
+  # conflict.  Keep this patch and apply-cloud-config.sh in sync on any key that
+  # both touch.
   - target:
       kind: ConfigMap
       name: scalestyle-config
     patch: |-
-      - op: add
+      - op: replace
         path: /data/ENVIRONMENT
         value: eks-production
 
@@ -86,3 +63,28 @@ patches:
       - op: replace
         path: /data/OTEL_LOGS_EXPORTER
         value: none
+
+# ECR image references.
+#
+# newName  — injected by sync-ecr-images.sh from Terraform outputs at deploy time.
+# newTag   — injected by sync-ecr-images.sh from the IMAGE_TAG env variable.
+#            IMAGE_TAG MUST be an immutable, content-addressed tag (e.g. "git-3f8c9ab").
+#            "latest" is NEVER a valid value here: it breaks rollback auditability and
+#            can silently produce divergent images across nodes with imagePullPolicy:
+#            IfNotPresent.
+#
+# To build and push: IMAGE_TAG=git-$(git rev-parse --short HEAD) ./build-push-ecr.sh
+# To deploy:        IMAGE_TAG=git-$(git rev-parse --short HEAD) ./deploy-production.sh
+images:
+  - name: scalestyle-gateway
+    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/gateway-service
+    newTag: "git-COMMIT_SHA"
+  - name: scalestyle-inference
+    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/inference-service
+    newTag: "git-COMMIT_SHA"
+  - name: scalestyle-data-init
+    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/data-init
+    newTag: "git-COMMIT_SHA"
+  - name: scalestyle-event-consumer
+    newName: <AWS_ACCOUNT_ID>.dkr.ecr.ap-southeast-2.amazonaws.com/event-consumer
+    newTag: "git-COMMIT_SHA"

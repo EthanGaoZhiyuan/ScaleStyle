@@ -1,15 +1,23 @@
 ---
-# EFS-backed StorageClass for shared volumes across multiple pods
-# Requires: EFS CSI Driver installed in cluster
-# Use case: inference model cache shared across 2+ replica pods
+# EFS-backed StorageClass for shared volumes across multiple pods.
+# Use case: inference model cache PVC (inference-model-cache-pvc.yaml) requires
+#           ReadWriteMany so that 2+ inference replicas on separate nodes can all
+#           mount the same Hugging Face model cache without re-downloading.
 #
-# Installation:
-#   kubectl apply -k "github.com/kubernetes-sigs/aws-efs-csi-driver/deploy/kubernetes/overlays/stable/?ref=release-1.7"
+# ⚠️  NOT READY FOR DEPLOYMENT — two manual steps required before applying:
 #
-# EFS filesystem must be created in AWS before use:
-#   - Same VPC as EKS cluster
-#   - Security group allowing NFS (port 2049) from worker nodes
-#   - Mount targets in each AZ
+# Step 1 — Provision an EFS filesystem (not in Terraform):
+#   - Create the filesystem in the same VPC as the EKS cluster.
+#   - Add a security group inbound rule: TCP 2049 (NFS) from the EKS worker node SG.
+#   - Create mount targets in each AZ used by the node group.
+#   - Replace fs-PLACEHOLDER below with the resulting filesystem ID (fs-xxxxxxxxx).
+#
+# Step 2 — Install the EFS CSI Driver into EKS (not in deploy-production.sh):
+#   kubectl apply -k \
+#     "github.com/kubernetes-sigs/aws-efs-csi-driver/deploy/kubernetes/overlays/stable/?ref=release-1.7"
+#
+# Until both steps are complete, inference-model-cache PVC will stay Pending and
+# inference pods will not start.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -17,7 +25,7 @@ metadata:
 provisioner: efs.csi.aws.com
 parameters:
   provisioningMode: efs-ap  # Access Point mode (isolated subdirectory per PVC)
-  fileSystemId: fs-PLACEHOLDER  # Replace with actual EFS ID at deployment
+  fileSystemId: fs-PLACEHOLDER  # ⚠️ MUST be replaced — see Step 1 above
   directoryPerms: "700"
   gidRangeStart: "1000"
   gidRangeEnd: "2000"

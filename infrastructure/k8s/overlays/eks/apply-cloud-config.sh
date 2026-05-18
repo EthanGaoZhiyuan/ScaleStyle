@@ -33,8 +33,8 @@ kubectl create configmap scalestyle-cloud-config \
   --from-literal=REDIS_TLS="true" \
   --from-literal=MILVUS_HOST=milvus.scalestyle.svc.cluster.local \
   --from-literal=MILVUS_PORT=19530 \
-  --from-literal=MILVUS_COLLECTION=scale_style_bge_v2 \
-  --from-literal=MILVUS_IMAGE_COLLECTION=scalestyle_image_v1 \
+  --from-literal=MILVUS_COLLECTION=scale_style_bge_small_v1_5 \
+  --from-literal=MILVUS_IMAGE_COLLECTION=scale_style_clip_image_v1 \
   --from-literal=INFERENCE_BASE_URL=http://inference.scalestyle.svc.cluster.local:8000 \
   --from-literal=SPRING_KAFKA_BOOTSTRAP_SERVERS=scalestyle-kafka-kafka-bootstrap.kafka-system.svc.cluster.local:9093 \
   --from-literal=KAFKA_BOOTSTRAP_SERVERS=scalestyle-kafka-kafka-bootstrap.kafka-system.svc.cluster.local:9093 \
@@ -42,7 +42,6 @@ kubectl create configmap scalestyle-cloud-config \
   --from-literal=KAFKA_SASL_MECHANISM=SCRAM-SHA-512 \
   --from-literal=KAFKA_POLL_MAX_RECORDS=100 \
   --from-literal=KAFKA_TOPIC=scalestyle.clicks \
-  --from-literal=KAFKA_GROUP_ID=event-consumer \
   --from-literal=OTEL_TRACES_EXPORTER=otlp \
   --from-literal=OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger-collector.scalestyle.svc.cluster.local:4317 \
   --from-literal=OTEL_METRICS_EXPORTER=none \
