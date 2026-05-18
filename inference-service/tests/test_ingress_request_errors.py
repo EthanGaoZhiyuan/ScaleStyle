@@ -34,7 +34,7 @@ class _DummyRequest:
 
 
 def _build_ingress(monkeypatch):
-    monkeypatch.setattr("deployments.ingress._redis_client", lambda: _DummyRedis())
+    monkeypatch.setattr("src.utils.redis_client.RedisClient.get_client", lambda: _DummyRedis())
     router = FakeHandle(
         route=lambda q, user_id=None: {
             "intent": "SEARCH",

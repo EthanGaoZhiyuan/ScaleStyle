@@ -5,6 +5,7 @@ import time
 from typing import List, Dict, Any, Optional
 
 from ray import serve
+from pymilvus.exceptions import MilvusException
 
 from src.utils.milvus_client import create_milvus_client
 
@@ -12,8 +13,10 @@ logger = logging.getLogger("scalestyle.retrieval")
 
 
 @serve.deployment(
-    # Milvus query with moderate CPU needs
-    ray_actor_options={"num_cpus": 0.25}
+    # Milvus query is primarily async I/O; higher concurrency is safe.
+    # Overridable via RETRIEVAL_MAX_ONGOING_REQUESTS env var.
+    ray_actor_options={"num_cpus": 0.25},
+    max_ongoing_requests=int(os.getenv("RETRIEVAL_MAX_ONGOING_REQUESTS", "20")),
 )
 class RetrievalDeployment:
     """
@@ -34,10 +37,10 @@ class RetrievalDeployment:
         """
         # Initialize ready state to False until Milvus is fully loaded
         self.ready = False
-        self.collection_name = os.getenv("MILVUS_COLLECTION", "scale_style_bge_v2")
+        self.collection_name = os.getenv("MILVUS_COLLECTION", "scale_style_bge_small_v1_5")
 
         logger.info(
-            f"🚀 Initializing RetrievalDeployment for collection: {self.collection_name}"
+            f"Initializing RetrievalDeployment for collection: {self.collection_name}"
         )
 
         try:
@@ -45,20 +48,20 @@ class RetrievalDeployment:
             # Reads MILVUS_HOST and MILVUS_PORT from environment at runtime
             logger.info("Connecting to Milvus with retry logic...")
             self.client = create_milvus_client(max_retries=10, retry_delay=3.0)
-            logger.info("✅ Milvus client created successfully")
+            logger.info("Milvus client created successfully")
 
             # Check if the Milvus collection exists
             logger.info(f"Checking if collection '{self.collection_name}' exists...")
             if not self.client.has_collection(self.collection_name):
                 logger.error(
-                    f"❌ Milvus collection '{self.collection_name}' not found. "
+                    f"Milvus collection '{self.collection_name}' not found. "
                     "Retrieval will be DISABLED until init is done. "
                     "Run: python data-pipeline/src/scripts/milvus_init.py"
                 )
                 self.ready = False
                 return
 
-            logger.info(f"✅ Collection '{self.collection_name}' found")
+            logger.info(f"Collection '{self.collection_name}' found")
 
             # Phase2 v2.3: Semaphore(8) allows concurrent Milvus searches (pymilvus is thread-safe)
             # Previous Lock serialized all searches → major p99 bottleneck under c=10 load
@@ -74,18 +77,18 @@ class RetrievalDeployment:
                 stats = self.client.get_collection_stats(self.collection_name)
                 row_count = stats.get("row_count", "unknown")
                 logger.info(
-                    f"✅ Milvus retrieval ready! Collection: {self.collection_name}, "
+                    f"Milvus retrieval ready! Collection: {self.collection_name}, "
                     f"Rows: {row_count}"
                 )
             except Exception as e:
                 logger.error(
-                    f"❌ Failed to load collection '{self.collection_name}': {e}"
+                    f"Failed to load collection '{self.collection_name}': {e}"
                 )
                 self.ready = False
 
         except Exception as e:
             logger.error(
-                f"❌ Failed to initialize RetrievalDeployment: {type(e).__name__}: {e}",
+                f"Failed to initialize RetrievalDeployment: {type(e).__name__}: {e}",
                 exc_info=True,
             )
             self.ready = False
@@ -147,8 +150,9 @@ class RetrievalDeployment:
         """
 
         t0 = time.time()
-        # Configure search parameters: COSINE similarity with nprobe=10
-        search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}}
+        # IP metric matches the collection index; with L2-normalised BGE embeddings
+        # inner-product ranking is equivalent to cosine similarity.
+        search_params = {"metric_type": "IP", "params": {"nprobe": 10}}
 
         # Build filter expression if filters are provided
         expr = self._build_filter_expr(filters or {})
@@ -158,29 +162,33 @@ class RetrievalDeployment:
         if expr:
             kwargs["filter"] = expr
 
+        def _do_search(**kw):
+            return self.client.search(
+                collection_name=self.collection_name,
+                data=[vector],
+                limit=candidate_k,
+                output_fields=["article_id"],
+                search_params=search_params,
+                **kw,
+            )
+
         try:
-            # Attempt search with newer API (filter parameter)
-            results = self.client.search(
-                collection_name=self.collection_name,
-                data=[vector],
-                limit=candidate_k,
-                output_fields=["article_id"],
-                search_params=search_params,
-                **kwargs,
-            )
+            results = _do_search(**kwargs)
         except TypeError:
-            # Fallback for older Milvus API (expr parameter)
-            kwargs = {}
-            if expr:
-                kwargs["expr"] = expr
-            results = self.client.search(
-                collection_name=self.collection_name,
-                data=[vector],
-                limit=candidate_k,
-                output_fields=["article_id"],
-                search_params=search_params,
-                **kwargs,
-            )
+            # Older Milvus API uses expr= instead of filter=
+            old_kwargs = {"expr": expr} if expr else {}
+            results = _do_search(**old_kwargs)
+        except MilvusException as exc:
+            if expr and "not exist" in str(exc):
+                # Filter references a metadata field absent from Milvus schema
+                # (e.g. colour_group_name lives in Redis only). Retry unfiltered.
+                logger.warning(
+                    "filter_field_missing expr=%r — retrying unfiltered: %s", expr, exc
+                )
+                results = _do_search()
+                expr = None
+            else:
+                raise
 
         # Extract search results (first query result)
         hits = results[0]

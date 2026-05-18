@@ -78,7 +78,7 @@ def test_ingress_metrics_endpoint_exports_shared_metrics(monkeypatch):
     observability_stub.setup_tracing = lambda service_name: object()
     monkeypatch.setitem(sys.modules, "src.utils.observability", observability_stub)
 
-    monkeypatch.setattr("src.deployments.ingress._redis_client", lambda: DummyRedis())
+    monkeypatch.setattr("src.utils.redis_client.RedisClient.get_client", lambda: DummyRedis())
     monkeypatch.setattr(
         "src.deployments.ingress.generate_latest_metrics", lambda: b"shared-metrics"
     )

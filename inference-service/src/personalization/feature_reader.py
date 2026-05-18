@@ -6,7 +6,7 @@ Load once, consume snapshot only. No per-item or per-feature Redis reads
 in the reranker or serving code.
 
 For legacy fine-grained readers (debug/admin only), use LegacyFeatureReader
-from feature_reader_legacy.
+from personalization.legacy.feature_reader_legacy.
 """
 
 import logging

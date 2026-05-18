@@ -76,7 +76,7 @@ def setup_tracing(service_name: str = "inference-service") -> trace.Tracer:
     _tracer_initialized = True
 
     logger.info(
-        f"✅ OpenTelemetry tracing initialized: {service_name} -> {jaeger_endpoint}"
+        f"OpenTelemetry tracing initialized: {service_name} -> {jaeger_endpoint}"
     )
 
     # Return tracer for this service

@@ -28,7 +28,11 @@ from opentelemetry import trace as otel_trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 # Import Ray Serve deployment classes
-from src.deployments.multimodal import merge_ranked_candidates
+from src.deployments.multimodal import (
+    merge_ranked_candidates,
+    fuse_with_normalized_scores,
+    apply_behavior_boost_to_hybrid_results,
+)
 
 from src.config import (
     RetrievalConfig,
@@ -36,6 +40,7 @@ from src.config import (
     RerankerConfig,
     ABTestConfig,
     PersonalizationConfig,
+    GenerationConfig,
 )
 from src.degradation import DegradationReason
 
@@ -51,11 +56,6 @@ from src.utils.metrics import (
 
 # Personalization module
 from src.personalization import FeatureReader, BehaviorBoost, NullFeatureReader
-from src.personalization.metrics import (
-    personalization_fallback_total,
-    personalization_fallback_active,
-    personalization_request_mode_total,
-)
 from src.services.search_result_service import (
     normalize_meta as _normalize_meta,
     enrich_and_filter as _enrich_and_filter,
@@ -121,6 +121,9 @@ class SearchRequest(BaseModel):
         "max_replicas": 3,
         "target_num_ongoing_requests_per_replica": 10,
     },
+    # Hard per-replica cap; autoscaling target (10) is the soft trigger.
+    # Default 50 is non-restrictive at current traffic; override via INGRESS_MAX_ONGOING_REQUESTS.
+    max_ongoing_requests=int(os.getenv("INGRESS_MAX_ONGOING_REQUESTS", "50")),
     ray_actor_options={"num_cpus": 0.25},
 )
 class IngressDeployment:
@@ -146,7 +149,7 @@ class IngressDeployment:
         retrieval_handle: DeploymentHandle,
         popularity_handle: DeploymentHandle,
         reranker_handle: DeploymentHandle,
-        generation_handle: DeploymentHandle,
+        generation_handle: Optional[DeploymentHandle] = None,
         vision_handle: Optional[DeploymentHandle] = None,
     ):
         """
@@ -186,7 +189,21 @@ class IngressDeployment:
         self._probe_stop_event = (
             threading.Event()
         )  # Signal probe thread to stop after recovery
-        personalization_fallback_active.set(0)
+
+        # Deferred import: Prometheus Gauge objects contain a _thread.lock that
+        # Ray 2.x cloudpickle cannot serialize at class-definition time.  Storing
+        # them as instance attributes keeps them out of the module-level global
+        # scope that Ray inspects when building ReplicaConfig.
+        from src.personalization.metrics import (
+            personalization_fallback_active,
+            personalization_fallback_total,
+            personalization_request_mode_total,
+        )
+        self._personalization_fallback_active = personalization_fallback_active
+        self._personalization_fallback_total = personalization_fallback_total
+        self._personalization_request_mode_total = personalization_request_mode_total
+
+        self._personalization_fallback_active.set(0)
 
         # Initialize OpenTelemetry tracer
         self.tracer = setup_tracing("inference-service")
@@ -259,18 +276,18 @@ class IngressDeployment:
         try:
             feature_reader = FeatureReader(self.redis)
             self._feature_reader_last_init_failed_at = None
-            personalization_fallback_active.set(0)
+            self._personalization_fallback_active.set(0)
             return feature_reader
         except Exception as e:
             logger.warning(
                 "personalization_init_failed err=%s -> using NullFeatureReader",
                 e,
             )
-            personalization_fallback_total.labels(
+            self._personalization_fallback_total.labels(
                 reason=DegradationReason.PERSONALIZATION_UNAVAILABLE.value
             ).inc()
             self._feature_reader_last_init_failed_at = time.time()
-            personalization_fallback_active.set(1)
+            self._personalization_fallback_active.set(1)
             self._ensure_feature_reader_probe_thread_started()
             return NullFeatureReader()
 
@@ -376,6 +393,10 @@ class IngressDeployment:
             if request.method == "POST" and path == "/search/image":
                 return await self._image_search_handler(request)
 
+            # Hybrid text + image search endpoint (POST /search/hybrid)
+            if request.method == "POST" and path == "/search/hybrid":
+                return await self._hybrid_search_handler(request)
+
             # Unknown path
             return JSONResponse({"error": "Not found", "path": path}, status_code=404)
 
@@ -439,6 +460,584 @@ class IngressDeployment:
             logger.exception("popularity_fallback_failed k=%d err=%s", k, e)
             return []
 
+    def _build_text_search_response(
+        self,
+        req: "SearchRequest",
+        t0: float,
+        request_id: str,
+        route: dict,
+        results: list,
+        *,
+        ctx: dict,
+        recall_k: int,
+        enrich_limit: int,
+        latency_patch: Optional[dict] = None,
+        extra_debug: Optional[dict] = None,
+    ) -> dict:
+        """Build response with contract normalization; records personalization mode metric once."""
+        results, contract_dbg = _contract_normalize(results, limit=req.k)
+        ctx["contract_dbg_cache"].clear()
+        ctx["contract_dbg_cache"].update(contract_dbg)
+
+        total_ms = (time.time() - t0) * 1000
+        resp = {
+            "query": req.query,
+            "route": route,
+            "results": results,
+            "request_id": request_id,
+        }
+
+        if req.debug:
+            latency = latency_patch or {}
+            latency["total"] = total_ms
+            resp["latency_ms"] = latency
+            resp["pipeline"] = {
+                "flow": route.get("flow", "smart"),
+                "recall_k": recall_k,
+                "rerank_max_docs": enrich_limit,
+                "rerank_enabled": RerankerConfig.ENABLED and (route.get("flow") == "smart"),
+            }
+            resp["contract"] = contract_dbg
+            if extra_debug:
+                resp.update(extra_debug)
+
+        if not ctx["personalization_mode_recorded"]:
+            self._personalization_request_mode_total.labels(
+                mode=ctx["personalization_mode"]
+            ).inc()
+            ctx["personalization_mode_recorded"] = True
+
+        return resp
+
+    def _record_search_metrics(self, t0: float, intent: str, flow: str, status: str = "success") -> None:
+        """Record request-level Prometheus metrics."""
+        logger.debug(f"Metrics recorded: intent={intent} flow={flow} status={status}")
+        metrics = self._get_metrics()
+        metrics["REQUEST_TOTAL"].labels(intent=intent, flow=flow, status=status).inc()
+        metrics["REQUEST_DURATION"].labels(intent=intent, flow=flow).observe((time.time() - t0))
+
+    async def _run_browse_fallback(
+        self, req: "SearchRequest", request_id: str, trace_id: str, route_ms: Optional[float]
+    ) -> tuple:
+        """Fetch popularity top-k for BROWSE intent; returns (results, fallback_ms)."""
+        t_fallback0 = time.perf_counter()
+        results = await self._safe_popularity_topk(req.k)
+        fallback_ms = self._record_phase_metric("fallback", t_fallback0, "browse_popularity")
+        logger.info(
+            "request_id=%s trace_id=%s intent=BROWSE k=%d phase=fallback outcome=browse_popularity latency_ms=%.2f",
+            request_id,
+            trace_id,
+            req.k,
+            fallback_ms,
+        )
+        return results, fallback_ms
+
+    async def _run_base_flow_fallback(
+        self, req: "SearchRequest", request_id: str, trace_id: str, route_ms: Optional[float]
+    ) -> tuple:
+        """Fetch popularity top-k for base-flow popularity mode; returns (results, fallback_ms)."""
+        t_fallback0 = time.perf_counter()
+        results = await self._safe_popularity_topk(req.k)
+        fallback_ms = self._record_phase_metric("fallback", t_fallback0, "base_popularity")
+        logger.info(
+            "request_id=%s trace_id=%s intent=SEARCH flow=base mode=popularity k=%d phase=fallback outcome=base_popularity latency_ms=%.2f",
+            request_id,
+            trace_id,
+            req.k,
+            fallback_ms,
+        )
+        return results, fallback_ms
+
+    async def _run_embed(
+        self,
+        req: "SearchRequest",
+        request_id: str,
+        trace_id: str,
+        intent: str,
+        flow: str,
+    ) -> tuple:
+        """
+        Run query embedding phase.
+
+        Returns (vector, embed_ms, degradation_reason_or_None).
+        On success degradation_reason is None; on timeout it is INFERENCE_TIMEOUT;
+        on other errors it is INFERENCE_UNAVAILABLE.
+        Does NOT fetch the popularity fallback — caller handles that based on the reason.
+        """
+        embed_ms = None
+        embed_timeout_ms = EmbeddingConfig.TIMEOUT_MS
+        with self.tracer.start_as_current_span("embed") as span:
+            span.set_attribute("query", req.query)
+            t_embed_phase0 = time.perf_counter()
+            try:
+                t_embed0 = time.time()
+                try:
+                    vector = await asyncio.wait_for(
+                        self.embedding_handle.embed.remote(req.query, is_query=True),
+                        timeout=embed_timeout_ms / 1000.0,
+                    )
+                    embed_ms = (time.time() - t_embed0) * 1000
+                    self._record_phase_metric("embed", t_embed_phase0, "success")
+                    span.set_attribute("latency_ms", embed_ms)
+                    return vector, embed_ms, None
+                except asyncio.TimeoutError:
+                    embed_ms = float(embed_timeout_ms)
+                    self._record_phase_metric("embed", t_embed_phase0, "timeout")
+                    span.set_attribute("timeout", True)
+                    span.set_attribute("latency_ms", embed_ms)
+                    logger.warning(
+                        "request_id=%s trace_id=%s embed_timeout timeout_ms=%d -> fallback popularity",
+                        request_id,
+                        trace_id,
+                        embed_timeout_ms,
+                    )
+                    return None, embed_ms, DegradationReason.INFERENCE_TIMEOUT
+            except Exception as e:
+                self._record_phase_metric("embed", t_embed_phase0, "error")
+                span.set_attribute("error", True)
+                span.set_attribute("error.message", str(e))
+                logger.exception(
+                    "request_id=%s trace_id=%s embed_failed error=%s -> fallback popularity",
+                    request_id,
+                    trace_id,
+                    e,
+                )
+                return None, embed_ms, DegradationReason.INFERENCE_UNAVAILABLE
+
+    async def _run_retrieval(
+        self,
+        vector: list,
+        req: "SearchRequest",
+        request_id: str,
+        trace_id: str,
+        filters: dict,
+        intent: str,
+        flow: str,
+    ) -> tuple:
+        """
+        Run vector retrieval phase.
+
+        Returns (candidates, ret_ms, degradation_reason_or_None).
+        On success degradation_reason is None; on timeout it is INFERENCE_TIMEOUT;
+        on other errors it is INFERENCE_UNAVAILABLE.
+        """
+        ret_ms = None
+        retrieval_timeout_ms = RetrievalConfig.TIMEOUT_MS
+        recall_k = RetrievalConfig.RECALL_K
+        with self.tracer.start_as_current_span("retrieve") as span:
+            span.set_attribute("candidate_k", recall_k)
+            span.set_attribute("filters", json.dumps(filters))
+            t_retrieve_phase0 = time.perf_counter()
+            try:
+                t_ret0 = time.time()
+                candidate_k = recall_k
+                try:
+                    candidates = await asyncio.wait_for(
+                        self.retrieval_handle.search.remote(
+                            vector,
+                            candidate_k=candidate_k,
+                            filters=filters,
+                        ),
+                        timeout=retrieval_timeout_ms / 1000.0,
+                    )
+                    ret_ms = (time.time() - t_ret0) * 1000
+                    self._record_phase_metric("retrieve", t_retrieve_phase0, "success")
+                    span.set_attribute("latency_ms", ret_ms)
+                    span.set_attribute("result_count", len(candidates))
+                    return candidates, ret_ms, None
+                except asyncio.TimeoutError:
+                    ret_ms = float(retrieval_timeout_ms)
+                    self._record_phase_metric("retrieve", t_retrieve_phase0, "timeout")
+                    span.set_attribute("timeout", True)
+                    span.set_attribute("latency_ms", ret_ms)
+                    logger.warning(
+                        "request_id=%s trace_id=%s retrieval_timeout timeout_ms=%d -> fallback popularity",
+                        request_id,
+                        trace_id,
+                        retrieval_timeout_ms,
+                    )
+                    return None, ret_ms, DegradationReason.INFERENCE_TIMEOUT
+            except Exception as e:
+                self._record_phase_metric("retrieve", t_retrieve_phase0, "error")
+                span.set_attribute("error", True)
+                span.set_attribute("error.message", str(e))
+                logger.exception(
+                    "request_id=%s trace_id=%s retrieval_failed error=%s -> fallback popularity",
+                    request_id,
+                    trace_id,
+                    e,
+                )
+                return None, ret_ms, DegradationReason.INFERENCE_UNAVAILABLE
+
+    async def _run_enrich(
+        self,
+        candidates: list,
+        req: "SearchRequest",
+        filters: dict,
+        enrich_limit: int,
+        request_id: str,
+        trace_id: str,
+    ) -> tuple:
+        """
+        Run metadata enrichment phase.
+
+        Returns (results, enrich_ms). Re-raises on failure (caller must handle).
+        """
+        enrich_ms = None
+        with self.tracer.start_as_current_span("enrich") as span:
+            t_enrich_phase0 = time.perf_counter()
+            try:
+                t_enrich0 = time.time()
+                metrics = self._get_metrics()
+                results = await _enrich_and_filter(
+                    self.redis,
+                    candidates,
+                    filters,
+                    req.k,
+                    limit=enrich_limit,
+                    cache_hit_metric=metrics["CACHE_HIT_TOTAL"],
+                    cache_miss_metric=metrics["CACHE_MISS_TOTAL"],
+                )
+                enrich_ms = (time.time() - t_enrich0) * 1000
+                self._record_phase_metric("enrich", t_enrich_phase0, "success")
+                span.set_attribute("latency_ms", enrich_ms)
+                span.set_attribute("result_count", len(results))
+                return results, enrich_ms
+            except Exception as e_enrich:
+                self._record_phase_metric("enrich", t_enrich_phase0, "error")
+                span.set_attribute("error", True)
+                span.set_attribute("error.message", str(e_enrich))
+                raise
+
+    async def _run_rerank_and_boost(
+        self,
+        results: list,
+        req: "SearchRequest",
+        request_id: str,
+        trace_id: str,
+        ctx: dict,
+        timeout_ms: float,
+    ) -> tuple:
+        """
+        Run reranking and personalization boost phase.
+
+        Mutates results in place (sorting). Sets ctx["snapshot_ms"] and
+        ctx["personalization_mode"] as side effects.
+        Returns (rerank_ms, rerank_mode, rerank_effect, behavior_boost_info).
+        """
+        rerank_ms = None
+        rerank_mode = None
+        rerank_effect = None
+        behavior_boost_info = {"boosted_items": 0}
+
+        with self.tracer.start_as_current_span("rerank") as span:
+            span.set_attribute("enabled", True)
+            span.set_attribute("doc_count", len(results))
+            t_rerank_phase0 = time.perf_counter()
+            try:
+                docs = [_build_rerank_doc(r.get("meta", {})) for r in results]
+                t_rr0 = time.time()
+
+                # Capture order before reranking for comparison
+                before_ids = [r.get("article_id") for r in results]
+
+                try:
+                    info = await asyncio.wait_for(
+                        self.reranker_handle.score.remote(req.query, docs),
+                        timeout=timeout_ms / 1000.0,
+                    )
+                except asyncio.TimeoutError:
+                    rerank_mode = "timeout"
+                    rerank_ms = float(timeout_ms)
+                    self._record_phase_metric("rerank", t_rerank_phase0, "timeout")
+                    span.set_attribute("timeout", True)
+                    span.set_attribute("latency_ms", rerank_ms)
+                    logger.warning(
+                        "request_id=%s trace_id=%s rerank_timeout timeout_ms=%d -> skip rerank",
+                        request_id,
+                        trace_id,
+                        timeout_ms,
+                    )
+                    info = None
+
+                if info:
+                    scores = info.get("scores", [])
+                    rerank_ms = info.get("rerank_ms", (time.time() - t_rr0) * 1000)
+                    self._record_phase_metric("rerank", t_rerank_phase0, "success")
+                    rerank_mode = info.get("mode", rerank_mode)
+                    span.set_attribute("latency_ms", rerank_ms)
+                    span.set_attribute("mode", rerank_mode)
+
+                    for i, r in enumerate(results):
+                        r["rerank_score"] = float(scores[i]) if i < len(scores) else -1e9
+
+                    results.sort(key=lambda x: x.get("rerank_score", -1e9), reverse=True)
+
+                    # Load one request-scoped personalization snapshot and
+                    # apply boost without any ad hoc Redis fan-out.
+                    if PersonalizationConfig.ENABLED:
+                        try:
+                            t_snapshot_phase0 = time.perf_counter()
+                            candidate_item_ids = [
+                                r.get("article_id") for r in results if r.get("article_id")
+                            ]
+                            snapshot = await asyncio.wait_for(
+                                asyncio.to_thread(
+                                    self.feature_reader.load_personalization_snapshot,
+                                    req.user_id,
+                                    candidate_item_ids,
+                                    max_recent_clicks=PersonalizationConfig.MAX_RECENT_CLICKS_USED,
+                                ),
+                                timeout=PersonalizationConfig.SNAPSHOT_TIMEOUT_MS / 1000.0,
+                            )
+                            ctx["snapshot_ms"] = self._record_phase_metric(
+                                "personalization_snapshot",
+                                t_snapshot_phase0,
+                                "degraded" if snapshot.degraded else "success",
+                            )
+                            behavior_boost_info = self.behavior_boost.apply_boost(snapshot, results)
+                            logger.info(
+                                "request_id=%s trace_id=%s phase=personalization_snapshot outcome=%s latency_ms=%.2f redis_round_trips=%d degrade_reasons=%s",
+                                request_id,
+                                trace_id,
+                                "degraded" if snapshot.degraded else "success",
+                                ctx["snapshot_ms"],
+                                snapshot.redis_round_trips,
+                                (
+                                    ",".join(reason.value for reason in snapshot.degraded_reasons)
+                                    if snapshot.degraded_reasons
+                                    else "none"
+                                ),
+                            )
+                            if snapshot.degraded:
+                                for degraded_reason in snapshot.degraded_reasons:
+                                    _record_request_degraded(self._get_metrics(), degraded_reason)
+                            if req.debug:
+                                behavior_boost_info["snapshot"] = {
+                                    "redis_round_trips": snapshot.redis_round_trips,
+                                    "degraded": snapshot.degraded,
+                                    "degraded_reasons": [
+                                        reason.value for reason in snapshot.degraded_reasons
+                                    ],
+                                }
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                "request_id=%s trace_id=%s personalization_snapshot_timeout user_id=%s timeout_ms=%.0f -> skip boost",
+                                request_id,
+                                trace_id,
+                                req.user_id,
+                                PersonalizationConfig.SNAPSHOT_TIMEOUT_MS,
+                            )
+                            behavior_boost_info = {"boosted_items": 0, "degraded": True}
+                            ctx["personalization_mode"] = "degraded_timeout"
+                            ctx["snapshot_ms"] = self._record_phase_metric(
+                                "personalization_snapshot",
+                                t_snapshot_phase0,
+                                "timeout",
+                            )
+                            _record_request_degraded(
+                                self._get_metrics(),
+                                DegradationReason.REDIS_TIMEOUT,
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "request_id=%s trace_id=%s behavior_boost_failed user_id=%s error=%s -> keep rerank result",
+                                request_id,
+                                trace_id,
+                                req.user_id,
+                                e,
+                            )
+                            behavior_boost_info = {"boosted_items": 0, "degraded": True}
+                            ctx["personalization_mode"] = "degraded_runtime_boost_failure"
+                            self._record_phase_metric(
+                                "personalization_snapshot",
+                                t_snapshot_phase0,
+                                DegradationReason.PERSONALIZATION_UNAVAILABLE.value,
+                            )
+                            _record_request_degraded(
+                                self._get_metrics(),
+                                DegradationReason.PERSONALIZATION_UNAVAILABLE,
+                            )
+                    else:
+                        logger.debug("Personalization disabled via PERSONALIZATION_ENABLED")
+
+                    # Capture order after reranking (and boosting)
+                    after_ids = [r.get("article_id") for r in results]
+
+                    # Calculate rerank effect
+                    top_k_compare = min(len(before_ids), len(after_ids), req.k)
+                    changed_positions = sum(
+                        1 for i in range(top_k_compare) if before_ids[i] != after_ids[i]
+                    )
+                    top1_changed = (
+                        before_ids[0] != after_ids[0] if before_ids and after_ids else False
+                    )
+
+                    rerank_effect = {
+                        "changed_positions": changed_positions,
+                        "top1_changed": top1_changed,
+                        "total_compared": top_k_compare,
+                    }
+                    span.set_attribute("changed_positions", changed_positions)
+                    span.set_attribute("top1_changed", top1_changed)
+
+                    # Log rerank changes for debugging and milestone verification
+                    if req.debug:
+                        logger.info(
+                            "request_id=%s RERANK_EFFECT: changed=%d/%d top1_changed=%s "
+                            "before_top5=%s after_top5=%s behavior_boost=%s",
+                            request_id,
+                            changed_positions,
+                            top_k_compare,
+                            top1_changed,
+                            before_ids[:5],
+                            after_ids[:5],
+                            behavior_boost_info,
+                        )
+                        # Detailed score comparison for top 3
+                        for i in range(min(3, len(before_ids))):
+                            boost_reason = (
+                                (
+                                    (results[i].get("_debug") or {}).get("boost") or {}
+                                ).get("boost_reason")
+                                or results[i].get("boost_reason")
+                                or "none"
+                            )
+                            logger.info(
+                                "request_id=%s RERANK_DETAIL rank=%d: "
+                                "article_id=%s vector_score=%.4f rerank_score=%.4f boost=%s",
+                                request_id,
+                                i + 1,
+                                after_ids[i],
+                                results[i].get("score", 0),
+                                results[i].get("rerank_score", 0),
+                                boost_reason,
+                            )
+
+            except Exception as e:
+                self._record_phase_metric("rerank", t_rerank_phase0, "error")
+                span.set_attribute("error", True)
+                span.set_attribute("error.message", str(e))
+                logger.exception(
+                    "request_id=%s trace_id=%s rerank_failed error=%s -> continue without rerank",
+                    request_id,
+                    trace_id,
+                    e,
+                )
+
+        return rerank_ms, rerank_mode, rerank_effect, behavior_boost_info
+
+    async def _run_generation(
+        self,
+        results: list,
+        req: "SearchRequest",
+        request_id: str,
+        ctx: dict,
+        *,
+        intent: str,
+        flow: str,
+    ) -> Optional[float]:
+        """
+        Run generation phase for Top-1 recommendation reason.
+
+        Mutates results[0] in place on success or failure. Updates ctx["contract_dbg_cache"]
+        on successful generation. Returns generation_ms or None if not attempted.
+        """
+        generation_enabled = os.getenv("GENERATION_ENABLED", "0") == "1"
+        generation_flow = os.getenv("GENERATION_FLOW", "smart")
+
+        if not (results and self.generation_handle and generation_enabled):
+            return None
+
+        should_generate = (
+            generation_flow == "all"
+            or (generation_flow == "search" and intent == "SEARCH")
+            or (generation_flow == "smart" and flow == "smart")
+        )
+        if not should_generate:
+            return None
+
+        generation_ms = None
+        with self.tracer.start_as_current_span("llm.generate_reason") as span:
+            span.set_attribute("enabled", True)
+            span.set_attribute("query_len", len(req.query))
+            span.set_attribute("topk", req.k)
+            span.set_attribute("model", os.getenv("GENERATION_MODEL", "qwen2.5"))
+            span.set_attribute("article_id", results[0].get("article_id", ""))
+            try:
+                t_gen0 = time.time()
+                timeout = GenerationConfig.TIMEOUT_MS / 1000.0
+                span.set_attribute("timeout_ms", GenerationConfig.TIMEOUT_MS)
+
+                out = await asyncio.wait_for(
+                    self.generation_handle.explain.remote(req.query, results[0]),
+                    timeout=timeout,
+                )
+                generation_ms = (time.time() - t_gen0) * 1000
+                reason_value = out.get("reason", "")
+                mode = out.get("mode", "unknown")  # Extract actual mode (template/llm)
+
+                # Add reason and reason_source at root level
+                # Use actual mode instead of hardcoding "llm"
+                results[0]["reason"] = reason_value
+                results[0]["reason_source"] = mode if reason_value else "fallback"
+
+                # Also keep in meta for backward compatibility
+                results[0].setdefault("meta", {})["reason"] = reason_value
+
+                span.set_attribute("latency_ms", generation_ms)
+                span.set_attribute("mode", mode)
+                span.set_attribute("fallback", not bool(reason_value))
+
+                # Update contract_dbg if reason was generated
+                if reason_value and ctx["contract_dbg_cache"]:
+                    missing_by_field = ctx["contract_dbg_cache"].get("missing_by_field", {})
+                    if missing_by_field.get("reason", 0) > 0:
+                        missing_by_field["reason"] = 0
+                        ctx["contract_dbg_cache"]["missing_total"] = sum(
+                            missing_by_field.values()
+                        )
+
+                logger.info(
+                    "request_id=%s generation_success gen_ms=%.2f mode=%s reason_source=%s",
+                    request_id,
+                    generation_ms,
+                    out.get("mode", "unknown"),
+                    "llm" if reason_value else "fallback",
+                )
+            except asyncio.TimeoutError:
+                generation_ms = timeout * 1000
+                # Add reason_source=fallback on timeout
+                results[0]["reason"] = ""
+                results[0]["reason_source"] = "fallback"
+                results[0].setdefault("meta", {})["reason"] = ""
+                span.set_attribute("timeout", True)
+                span.set_attribute("fallback", True)
+                span.set_attribute("latency_ms", generation_ms)
+                logger.warning(
+                    "request_id=%s generation_timeout timeout_ms=%.2f reason_source=fallback",
+                    request_id,
+                    timeout * 1000,
+                )
+            except Exception as e:
+                generation_ms = (
+                    (time.time() - t_gen0) * 1000 if "t_gen0" in locals() else 0
+                )
+                # Add reason_source=fallback on error
+                results[0]["reason"] = ""
+                results[0]["reason_source"] = "fallback"
+                results[0].setdefault("meta", {})["reason"] = ""
+                span.set_attribute("error", True)
+                span.set_attribute("fallback", True)
+                span.set_attribute("error.message", str(e))
+                logger.exception(
+                    "request_id=%s generation_failed err=%s",
+                    request_id,
+                    e,
+                )
+
+        return generation_ms
+
     async def _search_impl(self, req: SearchRequest):
         """
         Main search/recommendation endpoint.
@@ -458,97 +1057,41 @@ class IngressDeployment:
         Returns:
             dict: Search results with query, route info, results, and optional debug info.
         """
-        # Generate unique request ID for tracing and logging
+        # --- Setup ---
         request_id = str(uuid.uuid4())
         trace_id = _current_trace_id()
         t0 = time.time()
-        route_ms = None
-        snapshot_ms = None
-        fallback_ms = None
+        route_ms = embed_ms = ret_ms = enrich_ms = rerank_ms = fallback_ms = generation_ms = None
+        rerank_mode = rerank_effect = None
+        behavior_boost_info = {"boosted_items": 0}
 
-        # Load configuration from centralized config
         recall_k = RetrievalConfig.RECALL_K
         enrich_limit = RerankerConfig.MAX_DOCS
         timeout_ms = RerankerConfig.TIMEOUT_MS
 
-        # Track contract_dbg for post-generation correction
-        contract_dbg_cache = {}
-        personalization_mode = "disabled"
-        personalization_mode_recorded = False
+        ctx = {
+            "personalization_mode": "disabled",
+            "personalization_mode_recorded": False,
+            "contract_dbg_cache": {},
+            "snapshot_ms": None,
+        }
 
-        # Unified return helper to ensure consistent contract normalization
-        def _build_response(results, route, latency_patch=None, extra_debug=None):
-            """Helper to build response with contract normalization for all branches."""
-            nonlocal personalization_mode_recorded
-
-            # Always normalize results for contract compliance
-            results, contract_dbg = _contract_normalize(results, limit=req.k)
-
-            # Cache contract_dbg for potential correction after generation
-            contract_dbg_cache.clear()
-            contract_dbg_cache.update(contract_dbg)
-
-            total_ms = (time.time() - t0) * 1000
-            resp = {
-                "query": req.query,
-                "route": route,
-                "results": results,
-                "request_id": request_id,
-            }
-
-            if req.debug:
-                # Build latency object
-                latency = latency_patch or {}
-                latency["total"] = total_ms
-                resp["latency_ms"] = latency
-
-                # Add pipeline configuration
-                resp["pipeline"] = {
-                    "flow": route.get("flow", "smart"),
-                    "recall_k": recall_k,
-                    "rerank_max_docs": enrich_limit,
-                    "rerank_enabled": RerankerConfig.ENABLED
-                    and (route.get("flow") == "smart"),
-                }
-
-                # Add contract compliance stats
-                resp["contract"] = contract_dbg
-
-                # Add any extra debug info
-                if extra_debug:
-                    resp.update(extra_debug)
-
-            if not personalization_mode_recorded:
-                personalization_request_mode_total.labels(
-                    mode=personalization_mode
-                ).inc()
-                personalization_mode_recorded = True
-
-            return resp
-
-        # Helper to record Prometheus metrics before returning
-        def _record_metrics(intent, flow, status="success"):
-            """Record request metrics with consistent labels."""
-            logger.debug(
-                f"Metrics recorded: intent={intent} flow={flow} status={status}"
-            )
-            metrics = self._get_metrics()
-            metrics["REQUEST_TOTAL"].labels(
-                intent=intent, flow=flow, status=status
-            ).inc()
-            metrics["REQUEST_DURATION"].labels(intent=intent, flow=flow).observe(
-                (time.time() - t0)
+        def _respond(results, latency_patch=None, extra_debug=None):
+            return self._build_text_search_response(
+                req, t0, request_id, route, results,
+                ctx=ctx, recall_k=recall_k, enrich_limit=enrich_limit,
+                latency_patch=latency_patch, extra_debug=extra_debug,
             )
 
-        # Start main tracing span for entire request - ALL pipeline logic inside
         with self.tracer.start_as_current_span("search_request") as main_span:
-            # Add request attributes to span
             main_span.set_attribute("query", req.query)
             main_span.set_attribute("k", req.k)
             if req.user_id:
                 main_span.set_attribute("user_id", req.user_id)
             main_span.set_attribute("request_id", request_id)
             main_span.set_attribute("trace_id", trace_id)
+
+            # --- Route phase ---
             try:
                 t_route_phase0 = time.perf_counter()
                 route = await self.router_handle.route.remote(req.query, req.user_id)
@@ -556,778 +1099,196 @@ class IngressDeployment:
                 main_span.set_attribute("intent", route.get("intent", "SEARCH"))
                 logger.info(
                     "request_id=%s trace_id=%s phase=route outcome=success latency_ms=%.2f",
-                    request_id,
-                    trace_id,
-                    route_ms,
+                    request_id, trace_id, route_ms,
                 )
             except Exception as e:
                 route_ms = self._record_phase_metric("route", t_route_phase0, "error")
                 logger.exception(
                     "request_id=%s trace_id=%s route_failed error=%s",
-                    request_id,
-                    trace_id,
-                    e,
+                    request_id, trace_id, e,
                 )
-                # Fallback to default SEARCH intent on routing failure
                 route = {"intent": "SEARCH", "filters": {}}
                 main_span.set_attribute("error", True)
                 main_span.set_attribute("error.message", str(e))
                 logger.warning(
                     "request_id=%s trace_id=%s phase=route outcome=error latency_ms=%.2f error=%s",
-                    request_id,
-                    trace_id,
-                    route_ms,
-                    e,
+                    request_id, trace_id, route_ms, e,
                 )
 
-            # Extract intent and filters from routing result
             intent = route.get("intent", "SEARCH")
             filters = route.get("filters") or {}
-            # Determine A/B test flow: smart (with reranking) or base (without reranking)
             flow = route.get("flow") or (
                 "smart" if bucket_user(req.user_id, 2) == 0 else "base"
             )
             route["flow"] = flow
-
-            # Enable reranking only if globally enabled AND user is in "smart" flow
             enable_rerank = RerankerConfig.ENABLED and (flow == "smart")
 
             if PersonalizationConfig.ENABLED:
-                personalization_mode = (
+                ctx["personalization_mode"] = (
                     "degraded_init_fallback"
                     if isinstance(self.feature_reader, NullFeatureReader)
                     else "normal"
                 )
             else:
-                personalization_mode = "disabled"
+                ctx["personalization_mode"] = "disabled"
 
-            # Handle BROWSE intent - return popular items directly
+            # --- BROWSE branch ---
             if intent == "BROWSE":
-                t_fallback0 = time.perf_counter()
-                results = await self._safe_popularity_topk(req.k)
-                fallback_ms = self._record_phase_metric(
-                    "fallback", t_fallback0, "browse_popularity"
+                results, fallback_ms = await self._run_browse_fallback(
+                    req, request_id, trace_id, route_ms
                 )
+                self._record_search_metrics(t0, "BROWSE", flow)
+                return _respond(results, latency_patch={"route": route_ms, "fallback": fallback_ms})
 
-                logger.info(
-                    "request_id=%s trace_id=%s intent=BROWSE k=%d phase=fallback outcome=browse_popularity latency_ms=%.2f",
-                    request_id,
-                    trace_id,
-                    req.k,
-                    fallback_ms,
-                )
-                _record_metrics(intent="BROWSE", flow=flow, status="success")
-                return _build_response(
-                    results,
-                    route,
-                    latency_patch={"route": route_ms, "fallback": fallback_ms},
-                )
-
-            # Base Flow Mode - support pure popularity baseline for A/B test control group
-            # When BASE_FLOW_MODE=popularity and flow=base, skip embedding/retrieval entirely
+            # --- Base flow popularity branch ---
             base_flow_mode = ABTestConfig.BASE_FLOW_MODE
             if flow == "base" and base_flow_mode == "popularity":
-                # Use pure popularity baseline (no vector search)
-                t_fallback0 = time.perf_counter()
-                results = await self._safe_popularity_topk(req.k)
-                fallback_ms = self._record_phase_metric(
-                    "fallback", t_fallback0, "base_popularity"
+                results, fallback_ms = await self._run_base_flow_fallback(
+                    req, request_id, trace_id, route_ms
                 )
-                logger.info(
-                    "request_id=%s trace_id=%s intent=SEARCH flow=base mode=popularity k=%d phase=fallback outcome=base_popularity latency_ms=%.2f",
-                    request_id,
-                    trace_id,
-                    req.k,
-                    fallback_ms,
-                )
-                _record_metrics(intent="SEARCH", flow="base", status="success")
-                return _build_response(
+                self._record_search_metrics(t0, "SEARCH", "base")
+                return _respond(
                     results,
-                    route,
                     latency_patch={"route": route_ms, "fallback": fallback_ms},
                     extra_debug={"base_flow_mode": "popularity"} if req.debug else None,
                 )
 
-            # Generate query embedding for semantic search
-            embed_ms = None
-            embed_timeout_ms = EmbeddingConfig.TIMEOUT_MS
-            with self.tracer.start_as_current_span("embed") as span:
-                span.set_attribute("query", req.query)
-                t_embed_phase0 = time.perf_counter()
-                try:
-                    t_embed0 = time.time()
-                    try:
-                        vector = await asyncio.wait_for(
-                            self.embedding_handle.embed.remote(
-                                req.query, is_query=True
-                            ),
-                            timeout=embed_timeout_ms / 1000.0,
-                        )
-                        embed_ms = (time.time() - t_embed0) * 1000
-                        self._record_phase_metric("embed", t_embed_phase0, "success")
-                        span.set_attribute("latency_ms", embed_ms)
-                    except asyncio.TimeoutError:
-                        embed_ms = float(embed_timeout_ms)
-                        self._record_phase_metric("embed", t_embed_phase0, "timeout")
-                        span.set_attribute("timeout", True)
-                        span.set_attribute("latency_ms", embed_ms)
-                        logger.warning(
-                            "request_id=%s trace_id=%s embed_timeout timeout_ms=%d -> fallback popularity",
-                            request_id,
-                            trace_id,
-                            embed_timeout_ms,
-                        )
-                        t_fallback0 = time.perf_counter()
-                        results = await self._safe_popularity_topk(req.k)
-                        fallback_ms = self._record_phase_metric(
-                            "fallback",
-                            t_fallback0,
-                            DegradationReason.INFERENCE_TIMEOUT.value,
-                        )
-                        _record_request_degraded(
-                            self._get_metrics(), DegradationReason.INFERENCE_TIMEOUT
-                        )
-                        _record_metrics(intent=intent, flow=flow, status="fallback")
-                        return _build_response(
-                            results,
-                            route,
-                            latency_patch={
-                                "route": route_ms,
-                                "embed": embed_ms,
-                                "fallback": fallback_ms,
-                            },
-                        )
-                except Exception as e:
-                    # Fallback to popularity on embedding failure
-                    self._record_phase_metric("embed", t_embed_phase0, "error")
-                    span.set_attribute("error", True)
-                    span.set_attribute("error.message", str(e))
-                    logger.exception(
-                        "request_id=%s trace_id=%s embed_failed error=%s -> fallback popularity",
-                        request_id,
-                        trace_id,
-                        e,
-                    )
-                    t_fallback0 = time.perf_counter()
-                    results = await self._safe_popularity_topk(req.k)
-                    fallback_ms = self._record_phase_metric(
-                        "fallback",
-                        t_fallback0,
-                        DegradationReason.INFERENCE_UNAVAILABLE.value,
-                    )
-                    _record_request_degraded(
-                        self._get_metrics(), DegradationReason.INFERENCE_UNAVAILABLE
-                    )
-                    _record_metrics(intent=intent, flow=flow, status="fallback")
-                    return _build_response(
-                        results,
-                        route,
-                        latency_patch={
-                            "route": route_ms,
-                            "embed": embed_ms,
-                            "fallback": fallback_ms,
-                        },
-                    )
+            # --- Embed phase ---
+            vector, embed_ms, embed_fail = await self._run_embed(
+                req, request_id, trace_id, intent, flow
+            )
+            if embed_fail:
+                t_f0 = time.perf_counter()
+                results = await self._safe_popularity_topk(req.k)
+                fallback_ms = self._record_phase_metric("fallback", t_f0, embed_fail.value)
+                _record_request_degraded(self._get_metrics(), embed_fail)
+                self._record_search_metrics(t0, intent, flow, "fallback")
+                return _respond(
+                    results,
+                    latency_patch={"route": route_ms, "embed": embed_ms, "fallback": fallback_ms},
+                )
 
-            # Retrieve candidates from vector database
-            ret_ms = None
-            retrieval_timeout_ms = RetrievalConfig.TIMEOUT_MS
-            with self.tracer.start_as_current_span("retrieve") as span:
-                span.set_attribute("candidate_k", recall_k)
-                span.set_attribute("filters", json.dumps(filters))
-                t_retrieve_phase0 = time.perf_counter()
-                try:
-                    t_ret0 = time.time()
-                    # Use recall_k and enrich_limit already configured at function start
-                    candidate_k = recall_k
-                    try:
-                        candidates = await asyncio.wait_for(
-                            self.retrieval_handle.search.remote(
-                                vector,
-                                candidate_k=candidate_k,
-                                filters=filters,
-                            ),
-                            timeout=retrieval_timeout_ms / 1000.0,
-                        )
-                        ret_ms = (time.time() - t_ret0) * 1000
-                        self._record_phase_metric(
-                            "retrieve", t_retrieve_phase0, "success"
-                        )
-                        span.set_attribute("latency_ms", ret_ms)
-                        span.set_attribute("result_count", len(candidates))
-                    except asyncio.TimeoutError:
-                        ret_ms = float(retrieval_timeout_ms)
-                        self._record_phase_metric(
-                            "retrieve", t_retrieve_phase0, "timeout"
-                        )
-                        span.set_attribute("timeout", True)
-                        span.set_attribute("latency_ms", ret_ms)
-                        logger.warning(
-                            "request_id=%s trace_id=%s retrieval_timeout timeout_ms=%d -> fallback popularity",
-                            request_id,
-                            trace_id,
-                            retrieval_timeout_ms,
-                        )
-                        t_fallback0 = time.perf_counter()
-                        results = await self._safe_popularity_topk(req.k)
-                        fallback_ms = self._record_phase_metric(
-                            "fallback",
-                            t_fallback0,
-                            DegradationReason.INFERENCE_TIMEOUT.value,
-                        )
-                        _record_request_degraded(
-                            self._get_metrics(), DegradationReason.INFERENCE_TIMEOUT
-                        )
-                        _record_metrics(intent=intent, flow=flow, status="fallback")
-                        return _build_response(
-                            results,
-                            route,
-                            latency_patch={
-                                "route": route_ms,
-                                "embed": embed_ms,
-                                "retrieve": ret_ms,
-                                "fallback": fallback_ms,
-                            },
-                        )
-                except Exception as e:
-                    # Fallback to popularity on retrieval failure
-                    self._record_phase_metric("retrieve", t_retrieve_phase0, "error")
-                    span.set_attribute("error", True)
-                    span.set_attribute("error.message", str(e))
-                    logger.exception(
-                        "request_id=%s trace_id=%s retrieval_failed error=%s -> fallback popularity",
-                        request_id,
-                        trace_id,
-                        e,
-                    )
-                    t_fallback0 = time.perf_counter()
-                    results = await self._safe_popularity_topk(req.k)
-                    fallback_ms = self._record_phase_metric(
-                        "fallback",
-                        t_fallback0,
-                        DegradationReason.INFERENCE_UNAVAILABLE.value,
-                    )
-                    _record_request_degraded(
-                        self._get_metrics(), DegradationReason.INFERENCE_UNAVAILABLE
-                    )
-                    _record_metrics(intent=intent, flow=flow, status="fallback")
-                    return _build_response(
-                        results,
-                        route,
-                        latency_patch={
-                            "route": route_ms,
-                            "embed": embed_ms,
-                            "retrieve": ret_ms,
-                            "fallback": fallback_ms,
-                        },
-                    )
+            # --- Retrieve phase ---
+            candidates, ret_ms, ret_fail = await self._run_retrieval(
+                vector, req, request_id, trace_id, filters, intent, flow
+            )
+            if ret_fail:
+                t_f0 = time.perf_counter()
+                results = await self._safe_popularity_topk(req.k)
+                fallback_ms = self._record_phase_metric("fallback", t_f0, ret_fail.value)
+                _record_request_degraded(self._get_metrics(), ret_fail)
+                self._record_search_metrics(t0, intent, flow, "fallback")
+                return _respond(
+                    results,
+                    latency_patch={
+                        "route": route_ms, "embed": embed_ms,
+                        "retrieve": ret_ms, "fallback": fallback_ms,
+                    },
+                )
 
-            # Enrich candidates with metadata and apply post-retrieval filters
-            enrich_ms = None
-            rerank_ms = None
-            rerank_mode = None
-            rerank_effect = None  # Initialize rerank_effect
-
+            # --- Enrich + Rerank + Generate ---
             try:
-                with self.tracer.start_as_current_span("enrich") as span:
-                    t_enrich_phase0 = time.perf_counter()
-                    try:
-                        t_enrich0 = time.time()
-                        # Limit enrichment to top N candidates to control reranking cost (use value from function start)
-                        # Filter and enrich candidates with metadata (async to avoid blocking)
-                        metrics = self._get_metrics()
-                        results = await _enrich_and_filter(
-                            self.redis,
-                            candidates,
-                            filters,
-                            req.k,
-                            limit=enrich_limit,
-                            cache_hit_metric=metrics["CACHE_HIT_TOTAL"],
-                            cache_miss_metric=metrics["CACHE_MISS_TOTAL"],
-                        )
-                        enrich_ms = (time.time() - t_enrich0) * 1000
-                        self._record_phase_metric("enrich", t_enrich_phase0, "success")
-                        span.set_attribute("latency_ms", enrich_ms)
-                        span.set_attribute("result_count", len(results))
-                    except Exception as e_enrich:
-                        self._record_phase_metric("enrich", t_enrich_phase0, "error")
-                        span.set_attribute("error", True)
-                        span.set_attribute("error.message", str(e_enrich))
-                        raise
-
-                # Fallback to popularity if all candidates filtered out
-                # Initialize generation_ms to avoid undefined in fallback path
-                generation_ms = None
+                results, enrich_ms = await self._run_enrich(
+                    candidates, req, filters, enrich_limit, request_id, trace_id
+                )
 
                 if not results:
-                    t_fallback0 = time.perf_counter()
+                    t_f0 = time.perf_counter()
                     results = await self._safe_popularity_topk(req.k)
                     fallback_ms = self._record_phase_metric(
-                        "fallback",
-                        t_fallback0,
-                        DegradationReason.EMPTY_RESULTS_ALLOWED.value,
+                        "fallback", t_f0, DegradationReason.EMPTY_RESULTS_ALLOWED.value
                     )
                     _record_request_degraded(
                         self._get_metrics(), DegradationReason.EMPTY_RESULTS_ALLOWED
                     )
                 else:
-                    # Rerank results for improved semantic relevance (if enabled for user's flow)
-                    rerank_effect = None
                     if enable_rerank:
-                        with self.tracer.start_as_current_span("rerank") as span:
-                            span.set_attribute("enabled", True)
-                            span.set_attribute("doc_count", len(results))
-                            t_rerank_phase0 = time.perf_counter()
-                            try:
-                                docs = [
-                                    _build_rerank_doc(r.get("meta", {}))
-                                    for r in results
-                                ]
-                                t_rr0 = time.time()
-
-                                # Capture order before reranking for comparison
-                                before_ids = [r.get("article_id") for r in results]
-
-                                try:
-                                    info = await asyncio.wait_for(
-                                        self.reranker_handle.score.remote(
-                                            req.query, docs
-                                        ),
-                                        timeout=timeout_ms / 1000.0,
-                                    )
-                                except asyncio.TimeoutError:
-                                    rerank_mode = "timeout"
-                                    rerank_ms = float(timeout_ms)
-                                    self._record_phase_metric(
-                                        "rerank", t_rerank_phase0, "timeout"
-                                    )
-                                    span.set_attribute("timeout", True)
-                                    span.set_attribute("latency_ms", rerank_ms)
-                                    logger.warning(
-                                        "request_id=%s trace_id=%s rerank_timeout timeout_ms=%d -> skip rerank",
-                                        request_id,
-                                        trace_id,
-                                        timeout_ms,
-                                    )
-                                    info = None
-
-                                if info:
-                                    scores = info.get("scores", [])
-                                    rerank_ms = info.get(
-                                        "rerank_ms", (time.time() - t_rr0) * 1000
-                                    )
-                                    self._record_phase_metric(
-                                        "rerank", t_rerank_phase0, "success"
-                                    )
-                                    rerank_mode = info.get("mode", rerank_mode)
-                                    span.set_attribute("latency_ms", rerank_ms)
-                                    span.set_attribute("mode", rerank_mode)
-
-                                    for i, r in enumerate(results):
-                                        r["rerank_score"] = (
-                                            float(scores[i])
-                                            if i < len(scores)
-                                            else -1e9
-                                        )
-
-                                    results.sort(
-                                        key=lambda x: x.get("rerank_score", -1e9),
-                                        reverse=True,
-                                    )
-
-                                    # Load one request-scoped personalization snapshot and
-                                    # apply boost without any ad hoc Redis fan-out.
-                                    behavior_boost_info = {"boosted_items": 0}
-                                    if PersonalizationConfig.ENABLED:
-                                        try:
-                                            t_snapshot_phase0 = time.perf_counter()
-                                            candidate_item_ids = [
-                                                r.get("article_id")
-                                                for r in results
-                                                if r.get("article_id")
-                                            ]
-                                            snapshot = await asyncio.to_thread(
-                                                self.feature_reader.load_personalization_snapshot,
-                                                req.user_id,
-                                                candidate_item_ids,
-                                                max_recent_clicks=PersonalizationConfig.MAX_RECENT_CLICKS_USED,
-                                            )
-                                            snapshot_ms = self._record_phase_metric(
-                                                "personalization_snapshot",
-                                                t_snapshot_phase0,
-                                                (
-                                                    "degraded"
-                                                    if snapshot.degraded
-                                                    else "success"
-                                                ),
-                                            )
-                                            behavior_boost_info = (
-                                                self.behavior_boost.apply_boost(
-                                                    snapshot, results
-                                                )
-                                            )
-                                            logger.info(
-                                                "request_id=%s trace_id=%s phase=personalization_snapshot outcome=%s latency_ms=%.2f redis_round_trips=%d degrade_reasons=%s",
-                                                request_id,
-                                                trace_id,
-                                                (
-                                                    "degraded"
-                                                    if snapshot.degraded
-                                                    else "success"
-                                                ),
-                                                snapshot_ms,
-                                                snapshot.redis_round_trips,
-                                                (
-                                                    ",".join(
-                                                        reason.value
-                                                        for reason in snapshot.degraded_reasons
-                                                    )
-                                                    if snapshot.degraded_reasons
-                                                    else "none"
-                                                ),
-                                            )
-                                            if snapshot.degraded:
-                                                for (
-                                                    degraded_reason
-                                                ) in snapshot.degraded_reasons:
-                                                    _record_request_degraded(
-                                                        self._get_metrics(),
-                                                        degraded_reason,
-                                                    )
-                                            if req.debug:
-                                                behavior_boost_info["snapshot"] = {
-                                                    "redis_round_trips": snapshot.redis_round_trips,
-                                                    "degraded": snapshot.degraded,
-                                                    "degraded_reasons": [
-                                                        reason.value
-                                                        for reason in snapshot.degraded_reasons
-                                                    ],
-                                                }
-                                        except Exception as e:
-                                            logger.warning(
-                                                "request_id=%s trace_id=%s behavior_boost_failed user_id=%s error=%s -> keep rerank result",
-                                                request_id,
-                                                trace_id,
-                                                req.user_id,
-                                                e,
-                                            )
-                                            behavior_boost_info = {
-                                                "boosted_items": 0,
-                                                "degraded": True,
-                                            }
-                                            personalization_mode = (
-                                                "degraded_runtime_boost_failure"
-                                            )
-                                            self._record_phase_metric(
-                                                "personalization_snapshot",
-                                                t_snapshot_phase0,
-                                                DegradationReason.PERSONALIZATION_UNAVAILABLE.value,
-                                            )
-                                            _record_request_degraded(
-                                                self._get_metrics(),
-                                                DegradationReason.PERSONALIZATION_UNAVAILABLE,
-                                            )
-                                    else:
-                                        logger.debug(
-                                            "⏸️  Personalization disabled via PERSONALIZATION_ENABLED"
-                                        )
-
-                                    # Capture order after reranking (and boosting)
-                                    after_ids = [r.get("article_id") for r in results]
-
-                                    # Calculate rerank effect
-                                    top_k_compare = min(
-                                        len(before_ids), len(after_ids), req.k
-                                    )
-                                    changed_positions = sum(
-                                        1
-                                        for i in range(top_k_compare)
-                                        if before_ids[i] != after_ids[i]
-                                    )
-                                    top1_changed = (
-                                        before_ids[0] != after_ids[0]
-                                        if before_ids and after_ids
-                                        else False
-                                    )
-
-                                    rerank_effect = {
-                                        "changed_positions": changed_positions,
-                                        "top1_changed": top1_changed,
-                                        "total_compared": top_k_compare,
-                                    }
-                                    span.set_attribute(
-                                        "changed_positions", changed_positions
-                                    )
-                                    span.set_attribute("top1_changed", top1_changed)
-
-                                    # Log rerank changes for debugging and milestone verification
-                                    if req.debug:
-                                        logger.info(
-                                            "request_id=%s RERANK_EFFECT: changed=%d/%d top1_changed=%s "
-                                            "before_top5=%s after_top5=%s behavior_boost=%s",
-                                            request_id,
-                                            changed_positions,
-                                            top_k_compare,
-                                            top1_changed,
-                                            before_ids[:5],
-                                            after_ids[:5],
-                                            behavior_boost_info,
-                                        )
-                                        # Detailed score comparison for top 3
-                                        for i in range(min(3, len(before_ids))):
-                                            boost_reason = (
-                                                (
-                                                    (
-                                                        results[i].get("_debug") or {}
-                                                    ).get("boost")
-                                                    or {}
-                                                ).get("boost_reason")
-                                                or results[i].get("boost_reason")
-                                                or "none"
-                                            )
-                                            logger.info(
-                                                "request_id=%s RERANK_DETAIL rank=%d: "
-                                                "article_id=%s vector_score=%.4f rerank_score=%.4f boost=%s",
-                                                request_id,
-                                                i + 1,
-                                                after_ids[i],
-                                                results[i].get("score", 0),
-                                                results[i].get("rerank_score", 0),
-                                                boost_reason,
-                                            )
-
-                            except Exception as e:
-                                self._record_phase_metric(
-                                    "rerank", t_rerank_phase0, "error"
-                                )
-                                span.set_attribute("error", True)
-                                span.set_attribute("error.message", str(e))
-                                logger.exception(
-                                    "request_id=%s trace_id=%s rerank_failed error=%s -> continue without rerank",
-                                    request_id,
-                                    trace_id,
-                                    e,
-                                )
+                        rerank_ms, rerank_mode, rerank_effect, behavior_boost_info = (
+                            await self._run_rerank_and_boost(
+                                results, req, request_id, trace_id, ctx, timeout_ms
+                            )
+                        )
                     else:
-                        # Reranking disabled for this user's flow
                         rerank_mode = "off"
-
-                    # Trim to requested number of results
                     results = results[: req.k]
 
-                # Generate recommendation reason for Top-1 item (if generation enabled)
-                generation_enabled = os.getenv("GENERATION_ENABLED", "0") == "1"
-                generation_flow = os.getenv("GENERATION_FLOW", "smart")
+                generation_ms = await self._run_generation(
+                    results, req, request_id, ctx, intent=intent, flow=flow
+                )
 
-                if results and self.generation_handle and generation_enabled:
-                    # Check if should generate based on flow mode
-                    should_generate = (
-                        generation_flow == "all"
-                        or (generation_flow == "search" and intent == "SEARCH")
-                        or (generation_flow == "smart" and flow == "smart")
-                    )
-
-                    if should_generate:
-                        with self.tracer.start_as_current_span(
-                            "llm.generate_reason"
-                        ) as span:
-                            span.set_attribute("enabled", True)
-                            span.set_attribute("query_len", len(req.query))
-                            span.set_attribute("topk", req.k)
-                            span.set_attribute(
-                                "model", os.getenv("GENERATION_MODEL", "qwen2.5")
-                            )
-                            span.set_attribute(
-                                "article_id", results[0].get("article_id", "")
-                            )
-                            try:
-                                t_gen0 = time.time()
-                                # Reduced timeout to 500ms for faster response
-                                timeout = (
-                                    float(os.getenv("GENERATION_TIMEOUT_MS", "500"))
-                                    / 1000.0
-                                )
-                                span.set_attribute("timeout_ms", timeout * 1000)
-
-                                out = await asyncio.wait_for(
-                                    self.generation_handle.explain.remote(
-                                        req.query, results[0]
-                                    ),
-                                    timeout=timeout,
-                                )
-                                generation_ms = (time.time() - t_gen0) * 1000
-                                reason_value = out.get("reason", "")
-                                mode = out.get(
-                                    "mode", "unknown"
-                                )  # Extract actual mode (template/llm)
-
-                                # Add reason and reason_source at root level
-                                # Use actual mode instead of hardcoding "llm"
-                                results[0]["reason"] = reason_value
-                                results[0]["reason_source"] = (
-                                    mode if reason_value else "fallback"
-                                )
-
-                                # Also keep in meta for backward compatibility
-                                results[0].setdefault("meta", {})[
-                                    "reason"
-                                ] = reason_value
-
-                                span.set_attribute("latency_ms", generation_ms)
-                                span.set_attribute("mode", mode)
-                                span.set_attribute("fallback", not bool(reason_value))
-
-                                # Update contract_dbg if reason was generated
-                                if reason_value and contract_dbg_cache:
-                                    missing_by_field = contract_dbg_cache.get(
-                                        "missing_by_field", {}
-                                    )
-                                    if missing_by_field.get("reason", 0) > 0:
-                                        missing_by_field["reason"] = 0
-                                        contract_dbg_cache["missing_total"] = sum(
-                                            missing_by_field.values()
-                                        )
-
-                                logger.info(
-                                    "request_id=%s generation_success gen_ms=%.2f mode=%s reason_source=%s",
-                                    request_id,
-                                    generation_ms,
-                                    out.get("mode", "unknown"),
-                                    "llm" if reason_value else "fallback",
-                                )
-                            except asyncio.TimeoutError:
-                                generation_ms = timeout * 1000
-                                # Add reason_source=fallback on timeout
-                                results[0]["reason"] = ""
-                                results[0]["reason_source"] = "fallback"
-                                results[0].setdefault("meta", {})["reason"] = ""
-                                span.set_attribute("timeout", True)
-                                span.set_attribute("fallback", True)
-                                span.set_attribute("latency_ms", generation_ms)
-                                logger.warning(
-                                    "request_id=%s generation_timeout timeout_ms=%.2f reason_source=fallback",
-                                    request_id,
-                                    timeout * 1000,
-                                )
-                            except Exception as e:
-                                generation_ms = (
-                                    (time.time() - t_gen0) * 1000
-                                    if "t_gen0" in locals()
-                                    else 0
-                                )
-                                # Add reason_source=fallback on error
-                                results[0]["reason"] = ""
-                                results[0]["reason_source"] = "fallback"
-                                results[0].setdefault("meta", {})["reason"] = ""
-                                span.set_attribute("error", True)
-                                span.set_attribute("fallback", True)
-                                span.set_attribute("error.message", str(e))
-                                logger.exception(
-                                    "request_id=%s generation_failed err=%s",
-                                    request_id,
-                                    e,
-                                )
             except Exception as e:
-                # Fallback to popularity on enrichment/filtering failure (also needs contract normalize)
                 main_span.set_attribute("error", True)
                 main_span.set_attribute("error.message", str(e))
                 logger.exception(
                     "request_id=%s trace_id=%s enrich_filter_failed error=%s -> fallback popularity",
-                    request_id,
-                    trace_id,
-                    e,
+                    request_id, trace_id, e,
                 )
-                t_fallback0 = time.perf_counter()
+                t_f0 = time.perf_counter()
                 results = await self._safe_popularity_topk(req.k)
                 fallback_ms = self._record_phase_metric(
-                    "fallback",
-                    t_fallback0,
-                    DegradationReason.INFERENCE_UNAVAILABLE.value,
+                    "fallback", t_f0, DegradationReason.INFERENCE_UNAVAILABLE.value
                 )
                 _record_request_degraded(
                     self._get_metrics(), DegradationReason.INFERENCE_UNAVAILABLE
                 )
-                metrics = self._get_metrics()
-                metrics["REQUEST_TOTAL"].labels(
-                    intent=intent, flow=flow, status="fallback"
-                ).inc()
-                return _build_response(
+                self._record_search_metrics(t0, intent, flow, "fallback")
+                return _respond(
                     results,
-                    route,
                     latency_patch={
-                        "route": route_ms,
-                        "embed": embed_ms,
-                        "retrieve": ret_ms,
-                        "enrich": enrich_ms,
-                        "rerank": rerank_ms,
-                        "personalization_snapshot": snapshot_ms,
+                        "route": route_ms, "embed": embed_ms, "retrieve": ret_ms,
+                        "enrich": enrich_ms, "rerank": rerank_ms,
+                        "personalization_snapshot": ctx["snapshot_ms"],
                         "fallback": fallback_ms,
                     },
-                    extra_debug=(
-                        {"rerank": {"mode": rerank_mode}} if rerank_mode else None
-                    ),
+                    extra_debug={"rerank": {"mode": rerank_mode}} if rerank_mode else None,
                 )
 
-            # Build final response using unified helper (ensures contract_dbg is always defined)
+            # --- Final response ---
+            snapshot_ms = ctx["snapshot_ms"]
+
             rerank_debug = {"mode": rerank_mode} if rerank_mode else None
             if rerank_effect:
                 if rerank_debug is None:
                     rerank_debug = {}
                 rerank_debug["effect"] = rerank_effect
 
-            # Build debug info for generation
             generation_debug = None
             if generation_ms is not None:
                 generation_enabled = os.getenv("GENERATION_ENABLED", "0") == "1"
                 generation_flow = os.getenv("GENERATION_FLOW", "smart")
-                # Note: mode is logged but not exposed in debug for simplicity
                 generation_debug = {
                     "enabled": generation_enabled,
                     "flow": generation_flow,
                     "latency_ms": round(generation_ms, 2),
                 }
 
-            # Aggregate all debug information
             extra_debug = {}
             if rerank_debug:
                 extra_debug["rerank"] = rerank_debug
             if generation_debug:
                 extra_debug["generation"] = generation_debug
 
-            resp = _build_response(
+            resp = _respond(
                 results,
-                route,
                 latency_patch={
-                    "route": route_ms,
-                    "embed": embed_ms,
-                    "retrieve": ret_ms,
-                    "enrich": enrich_ms,
-                    "rerank": rerank_ms,
+                    "route": route_ms, "embed": embed_ms, "retrieve": ret_ms,
+                    "enrich": enrich_ms, "rerank": rerank_ms,
                     "personalization_snapshot": snapshot_ms,
-                    "fallback": fallback_ms,
-                    "generation": generation_ms,
+                    "fallback": fallback_ms, "generation": generation_ms,
                 },
                 extra_debug=extra_debug if extra_debug else None,
             )
 
-            # Log request metrics for monitoring and analysis
             total_ms = resp.get("latency_ms", {}).get("total")
             logger.info(
                 "request_id=%s trace_id=%s intent=SEARCH k=%d route_ms=%.2f embed_ms=%.2f ret_ms=%.2f snapshot_ms=%.2f gen_ms=%.2f total_ms=%.2f filters=%s personalization_mode=%s",
-                request_id,
-                trace_id,
-                req.k,
-                route_ms or -1,
-                embed_ms or -1,
-                ret_ms or -1,
-                snapshot_ms or -1,
-                generation_ms or -1,
-                total_ms or -1,
+                request_id, trace_id, req.k,
+                route_ms or -1, embed_ms or -1, ret_ms or -1,
+                snapshot_ms or -1, generation_ms or -1, total_ms or -1,
                 json.dumps(filters, ensure_ascii=False),
-                personalization_mode,
+                ctx["personalization_mode"],
             )
 
-            # Update span with final attributes
             main_span.set_attribute("intent", intent)
             main_span.set_attribute("flow", flow)
             main_span.set_attribute("result_count", len(results))
@@ -1341,11 +1302,8 @@ class IngressDeployment:
             if generation_ms:
                 main_span.set_attribute("generation_latency_ms", generation_ms)
 
-            # Record Prometheus metrics
             metrics = self._get_metrics()
-            metrics["REQUEST_TOTAL"].labels(
-                intent=intent, flow=flow, status="success"
-            ).inc()
+            metrics["REQUEST_TOTAL"].labels(intent=intent, flow=flow, status="success").inc()
             metrics["REQUEST_DURATION"].labels(intent=intent, flow=flow).observe(
                 (time.time() - t0)
             )
@@ -1483,9 +1441,33 @@ class IngressDeployment:
 
             total_ms = int((time.time() - t0) * 1000)
 
+            dto_items = []
+            for r in results:
+                meta = r.get("meta") or {}
+                price_val = meta.get("price")
+                try:
+                    price = float(price_val) if price_val not in (None, "") else 0.0
+                except (TypeError, ValueError):
+                    price = 0.0
+                dto_items.append(
+                    {
+                        "itemId": str(r.get("article_id", "")).zfill(10),
+                        "name": meta.get("title") or "",
+                        "category": meta.get("dept") or "",
+                        "description": meta.get("desc") or "",
+                        "price": price,
+                        "imgUrl": meta.get("image_url") or "",
+                        "source": "ray",
+                        "degraded": False,
+                        "degradedReason": None,
+                        "reason": meta.get("reason") or "",
+                        "reasonSource": None,
+                    }
+                )
+
             return JSONResponse(
                 {
-                    "items": results,
+                    "items": dto_items,
                     "k": k,
                     "request_id": request_id,
                     "latency_ms": total_ms,
@@ -1648,8 +1630,35 @@ class IngressDeployment:
         total_ms = (time.perf_counter() - started_at) * 1000.0
         degraded = bool(degraded_reasons)
 
+        dto_items = []
+        for r in results:
+            meta = r.get("meta") or {}
+            price_val = meta.get("price")
+            try:
+                price = float(price_val) if price_val not in (None, "") else 0.0
+            except (TypeError, ValueError):
+                price = 0.0
+            dto_items.append(
+                {
+                    "itemId": str(r.get("article_id", "")).zfill(10),
+                    "name": meta.get("title") or "",
+                    "category": meta.get("dept") or "",
+                    "description": meta.get("desc") or "",
+                    "price": price,
+                    "imgUrl": meta.get("image_url") or "",
+                    "source": "ray",
+                    "degraded": degraded,
+                    "degradedReason": ",".join(degraded_reasons) if len(degraded_reasons) == 1 else (
+                        ",".join(degraded_reasons) if degraded_reasons else None
+                    ),
+                    "reason": meta.get("reason") or "",
+                    "reasonSource": None,
+                    "candidateSources": r.get("candidate_sources", []),
+                }
+            )
+
         response = {
-            "items": results,
+            "items": dto_items,
             "k": k,
             "mode": "multimodal",
             "architecture": "dual_recall_merge_rerank",
@@ -1681,3 +1690,252 @@ class IngressDeployment:
             }
 
         return JSONResponse(response)
+
+    async def _hybrid_search_handler(self, request: Request) -> JSONResponse:
+        """
+        Hybrid text + image search: dual recall with min-max normalized score fusion.
+
+        Runs BGE-small text retrieval and CLIP image retrieval in parallel, then merges
+        candidates using per-list min-max normalization and weighted score fusion:
+
+            final_score = image_weight * norm_image_score
+                        + text_weight  * norm_text_score
+                        + behavior_weight * behavior_score
+
+        Fallback behaviour:
+          - Image recall fails, text succeeds → text-only results, degraded=true,
+            degradedReason=HYBRID_IMAGE_PATH_FAILED_TEXT_ONLY
+          - Text recall fails, image succeeds → image-only results, degraded=true,
+            degradedReason=HYBRID_TEXT_PATH_FAILED_IMAGE_ONLY
+          - Both fail → 500 (gateway falls back to popularity)
+        """
+        t0 = time.perf_counter()
+
+        try:
+            if self.vision_handle is None:
+                return JSONResponse(
+                    {"error": "Vision search not available (VISION_ENABLED=0)", "status": "unavailable"},
+                    status_code=503,
+                )
+
+            body = await request.json()
+            query = str(body.get("query") or "").strip()
+            image_base64 = body.get("image_base64")
+            k = int(body.get("k", 10))
+            request_id = str(uuid.uuid4())
+            debug = bool(body.get("debug", False))
+
+            if not query:
+                return JSONResponse(
+                    {"error": "query is required for hybrid search", "status": "error"},
+                    status_code=400,
+                )
+            if not image_base64:
+                return JSONResponse(
+                    {"error": "image_base64 is required for hybrid search", "status": "error"},
+                    status_code=400,
+                )
+
+            # Parse weights; normalize so they sum to 1 inside fuse_with_normalized_scores
+            image_weight = max(0.0, float(body.get("image_weight", 0.5) or 0.5))
+            text_weight = max(0.0, float(body.get("text_weight", 0.4) or 0.4))
+            behavior_weight = max(0.0, float(body.get("behavior_weight", 0.1) or 0.0))
+            user_id = str(body.get("user_id") or "").strip() or None
+
+            # Recall more candidates than k so fusion has enough overlap to work with
+            recall_k = min(RetrievalConfig.RECALL_K, max(50, k * 10))
+
+            async def recall_text() -> list[dict]:
+                vector = await asyncio.wait_for(
+                    self.embedding_handle.embed.remote(query, is_query=True),
+                    timeout=EmbeddingConfig.TIMEOUT_MS / 1000.0,
+                )
+                return await asyncio.wait_for(
+                    self.retrieval_handle.search.remote(vector, candidate_k=recall_k, filters={}),
+                    timeout=RetrievalConfig.TIMEOUT_MS / 1000.0,
+                )
+
+            async def recall_image() -> list[dict]:
+                vision_body = {"mode": "image", "image_base64": image_base64, "k": recall_k}
+                vision_result = await self.vision_handle.remote(vision_body)
+                if vision_result.get("status") == "error":
+                    raise RuntimeError(vision_result.get("error", "image recall failed"))
+                return list(vision_result.get("items") or [])
+
+            text_task = asyncio.create_task(recall_text())
+            image_task = asyncio.create_task(recall_image())
+            text_result, image_result = await asyncio.gather(
+                text_task, image_task, return_exceptions=True
+            )
+
+            degraded_reasons: list[str] = []
+            text_candidates: list[dict] = []
+            image_candidates: list[dict] = []
+
+            if isinstance(text_result, Exception):
+                degraded_reasons.append("HYBRID_TEXT_PATH_FAILED_IMAGE_ONLY")
+                logger.warning("hybrid text recall failed: %s", text_result)
+            else:
+                text_candidates = list(text_result)
+
+            if isinstance(image_result, Exception):
+                degraded_reasons.append("HYBRID_IMAGE_PATH_FAILED_TEXT_ONLY")
+                logger.warning("hybrid image recall failed: %s", image_result)
+            else:
+                image_candidates = list(image_result)
+
+            if not text_candidates and not image_candidates:
+                return JSONResponse(
+                    {
+                        "error": "Both hybrid recall branches failed",
+                        "status": "error",
+                        "mode": "hybrid",
+                        "request_id": request_id,
+                    },
+                    status_code=500,
+                )
+
+            # Min-max normalized weighted fusion
+            merged_candidates = fuse_with_normalized_scores(
+                text_candidates,
+                image_candidates,
+                limit=recall_k,
+                image_weight=image_weight,
+                text_weight=text_weight,
+                behavior_weight=behavior_weight,
+            )
+
+            # Redis metadata enrichment
+            metrics = self._get_metrics()
+            results = await _enrich_and_filter(
+                self.redis,
+                merged_candidates,
+                {},
+                k,
+                limit=recall_k,
+                cache_hit_metric=metrics["CACHE_HIT_TOTAL"],
+                cache_miss_metric=metrics["CACHE_MISS_TOTAL"],
+            )
+
+            # Annotate enriched results with fusion scores (keyed by canonical article_id)
+            merged_by_id = {c["article_id"]: c for c in merged_candidates}
+            for result in results:
+                fused = merged_by_id.get(result.get("article_id")) or {}
+                result["final_score"] = fused.get("final_score", fused.get("score"))
+                result["image_score"] = fused.get("image_score")
+                result["text_score"] = fused.get("text_score")
+                result["behavior_score"] = fused.get("behavior_score", 0.0)
+                result["candidate_sources"] = fused.get("candidate_sources", [])
+                result["score"] = result["final_score"]
+
+            # Post-fusion behavior boost via existing BehaviorBoost / FeatureReader path.
+            # Snapshot load is offloaded to a thread with a hard 50 ms timeout so Redis
+            # latency cannot affect the hybrid response budget. Any failure degrades
+            # gracefully: behavior_score stays 0.0 and ordering is unchanged.
+            if PersonalizationConfig.ENABLED and user_id and results:
+                try:
+                    candidate_item_ids = [
+                        r.get("article_id") for r in results if r.get("article_id")
+                    ]
+                    snapshot = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            self.feature_reader.load_personalization_snapshot,
+                            user_id,
+                            candidate_item_ids,
+                            max_recent_clicks=PersonalizationConfig.MAX_RECENT_CLICKS_USED,
+                        ),
+                        timeout=0.050,
+                    )
+                    apply_behavior_boost_to_hybrid_results(
+                        results, snapshot, self.behavior_boost
+                    )
+                    logger.debug(
+                        "request_id=%s hybrid_behavior_boost user_id=%s degraded=%s",
+                        request_id,
+                        user_id,
+                        snapshot.degraded,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "request_id=%s hybrid_behavior_boost_timeout user_id=%s -> no boost applied",
+                        request_id,
+                        user_id,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "request_id=%s hybrid_behavior_boost_failed user_id=%s error=%s -> no boost applied",
+                        request_id,
+                        user_id,
+                        e,
+                    )
+
+            results, contract_debug = _contract_normalize(results, k)
+            total_ms = (time.perf_counter() - t0) * 1000.0
+            degraded = bool(degraded_reasons)
+
+            dto_items = []
+            for r in results:
+                meta = r.get("meta") or {}
+                price_val = meta.get("price")
+                try:
+                    price = float(price_val) if price_val not in (None, "") else 0.0
+                except (TypeError, ValueError):
+                    price = 0.0
+                dto_items.append(
+                    {
+                        "itemId": str(r.get("article_id", "")).zfill(10),
+                        "name": meta.get("title") or "",
+                        "category": meta.get("dept") or "",
+                        "description": meta.get("desc") or "",
+                        "price": price,
+                        "imgUrl": meta.get("image_url") or "",
+                        "source": "hybrid",
+                        "degraded": degraded,
+                        "degradedReason": degraded_reasons[0] if len(degraded_reasons) == 1 else (
+                            ",".join(degraded_reasons) if degraded_reasons else None
+                        ),
+                        "reason": meta.get("reason") or "",
+                        "reasonSource": None,
+                        # Hybrid-specific score fields
+                        "finalScore": r.get("final_score"),
+                        "imageScore": r.get("image_score"),
+                        "textScore": r.get("text_score"),
+                        "behaviorScore": r.get("behavior_score", 0.0),
+                        "candidateSources": r.get("candidate_sources", []),
+                    }
+                )
+
+            response: dict = {
+                "items": dto_items,
+                "k": k,
+                "mode": "hybrid",
+                "architecture": "dual_recall_normalized_fusion",
+                "status": "success",
+                "request_id": request_id,
+                "latency_ms": total_ms,
+                "degraded": degraded,
+                "degraded_reason": ",".join(degraded_reasons) if degraded_reasons else None,
+                "contract_debug": contract_debug,
+            }
+
+            if debug:
+                response["debug"] = {
+                    "hybrid": {
+                        "recall_k": recall_k,
+                        "text_candidates": len(text_candidates),
+                        "image_candidates": len(image_candidates),
+                        "merged_candidates": len(merged_candidates),
+                        "weights": {
+                            "image": image_weight,
+                            "text": text_weight,
+                            "behavior": behavior_weight,
+                        },
+                        "latency_ms": {"total": total_ms},
+                    }
+                }
+
+            return JSONResponse(response)
+
+        except Exception as e:
+            logger.exception("Hybrid search failed: %s", e)
+            return JSONResponse({"error": str(e), "status": "error"}, status_code=500)

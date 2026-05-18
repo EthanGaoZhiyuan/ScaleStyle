@@ -61,7 +61,7 @@ def create_milvus_client(
             # Verify connection is actually usable
             try:
                 client.list_collections()
-                logger.info(f"✅ Milvus connection successful to {uri}")
+                logger.info(f"Milvus connection successful to {uri}")
                 return client
             except Exception as verify_error:
                 logger.warning(
@@ -75,13 +75,13 @@ def create_milvus_client(
                 # Exponential backoff: 2^attempt * retry_delay, max 30 seconds
                 backoff_delay = min(retry_delay * (2**attempt), 30.0)
                 logger.warning(
-                    f"⚠️  Milvus connection attempt {attempt + 1}/{max_retries} failed: {e}. "
+                    f"Milvus connection attempt {attempt + 1}/{max_retries} failed: {e}. "
                     f"Retrying in {backoff_delay:.1f}s..."
                 )
                 time.sleep(backoff_delay)
             else:
                 logger.error(
-                    f"❌ Failed to connect to Milvus at {uri} after {max_retries} attempts. "
+                    f"Failed to connect to Milvus at {uri} after {max_retries} attempts. "
                     f"Last error: {type(e).__name__}: {e}"
                 )
 
@@ -126,7 +126,7 @@ def ensure_connection(
                 f"Connecting to Milvus at {host}:{port} (attempt {attempt + 1}/{max_retries})"
             )
             connections.connect(alias, host=host, port=port)
-            logger.info(f"✅ Milvus connection '{alias}' successful")
+            logger.info(f"Milvus connection '{alias}' successful")
             return
         except Exception as e:
             last_error = e
@@ -136,7 +136,7 @@ def ensure_connection(
                 )
                 time.sleep(retry_delay)
             else:
-                logger.error(f"❌ Failed to connect after {max_retries} attempts")
+                logger.error(f"Failed to connect after {max_retries} attempts")
 
     raise ConnectionError(
         f"Could not connect to Milvus at {host}:{port} after {max_retries} attempts. "

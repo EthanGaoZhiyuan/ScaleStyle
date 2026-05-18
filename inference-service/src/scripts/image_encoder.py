@@ -83,12 +83,12 @@ class ImageEncoder:
 
         load_time = time.time() - start_time
 
-        print(f"✅ Model loaded in {load_time:.2f}s\n")
+        print(f"Model loaded in {load_time:.2f}s\n")
 
         # Enable mixed precision for faster inference on A100/H100
         if device == "cuda" and torch.cuda.get_device_capability()[0] >= 8:
             torch.set_float32_matmul_precision("high")
-            print("✅ Mixed precision enabled (A100/H100 optimization)\n")
+            print("Mixed precision enabled (A100/H100 optimization)\n")
 
     def encode_single(self, image_path: Path) -> Optional[Dict]:
         """
@@ -126,7 +126,7 @@ class ImageEncoder:
             }
 
         except Exception as e:
-            print(f"⚠️  Error processing {image_path}: {e}")
+            print(f"Error processing {image_path}: {e}")
             return None
 
     def encode_batch(
@@ -176,7 +176,7 @@ class ImageEncoder:
                         }
                     )
                 except Exception as e:
-                    print(f"\n⚠️  Skipping {img_path}: {e}")
+                    print(f"\nSkipping {img_path}: {e}")
                     continue
 
             if not images:
@@ -209,7 +209,7 @@ class ImageEncoder:
             avg_time_per_image = total_time / len(results) * 1000  # ms
             throughput = len(results) / total_time if total_time > 0 else 0
             print(f"\n{'='*60}")
-            print(f"✅ Processed {len(results)}/{len(image_paths)} images")
+            print(f"Processed {len(results)}/{len(image_paths)} images")
             print(f"   Total time: {total_time:.2f}s")
             print(f"   Throughput: {throughput:.1f} img/s")
             print(f"   Avg per image: {avg_time_per_image:.1f}ms")
@@ -232,7 +232,7 @@ class ImageEncoder:
             compression: "snappy", "gzip", or None
         """
         if not results:
-            print("⚠️  No results to save")
+            print("No results to save")
             return
 
         # Convert to DataFrame
@@ -247,7 +247,7 @@ class ImageEncoder:
         df.to_parquet(output_path, compression=compression, index=False)
 
         file_size_mb = output_path.stat().st_size / 1024 / 1024
-        print(f"✅ Saved {len(results)} embeddings to {output_path}")
+        print(f"Saved {len(results)} embeddings to {output_path}")
         print(f"   File size: {file_size_mb:.2f} MB")
 
 
@@ -306,7 +306,7 @@ def main():
     print(f"\nFound {len(image_paths)} images in {image_dir}")
 
     if not image_paths:
-        print("⚠️  No images found!")
+        print("No images found!")
         return
 
     # Encode

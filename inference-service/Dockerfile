@@ -38,24 +38,25 @@ LABEL org.opencontainers.image.title="ScaleStyle Inference Service" \
 
 WORKDIR /app
 
-# Install runtime dependencies only (curl for healthcheck)
+# Install runtime dependencies: curl (healthcheck) + gosu (privilege drop in entrypoint)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
 
-# Copy application code
+# Copy application code and entrypoint
 COPY src ./src
-COPY server.py .
+COPY entrypoint.sh /entrypoint.sh
 
-# Create non-root user for security
+# Create non-root user; entrypoint chowns the HF cache volume at runtime
+# (Docker named volumes are root-owned at creation; gosu drops to scalestyle)
 RUN useradd -m -u 1000 scalestyle && \
     mkdir -p /cache/huggingface && \
-    chown -R scalestyle:scalestyle /app /cache
-
-USER scalestyle
+    chown -R scalestyle:scalestyle /app /cache && \
+    chmod +x /entrypoint.sh
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
@@ -73,8 +74,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/readyz || exit 1
 
-# Fix: Use config.yaml (GENERATION_ENABLED=1) to match ConfigMap settings
-# Use RAY_SERVE_CONFIG env var to override if needed (e.g., for minimal testing)
-ENV RAY_SERVE_CONFIG=src/ray_serve/config.yaml
-CMD ["sh", "-c", "serve run $RAY_SERVE_CONFIG"]
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["python", "src/server.py"]
 

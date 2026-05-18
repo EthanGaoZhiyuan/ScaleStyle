@@ -33,4 +33,6 @@ def test_embedding_deployment_has_bounded_serve_concurrency():
 
     assert options["num_replicas"] == 1
     assert options["max_ongoing_requests"] == EMBEDDING_MAX_ONGOING_REQUESTS
+    # Default 4 when EMBEDDING_MAX_ONGOING_REQUESTS env var is unset.
+    # Override via env var to tune the text embedding path independently.
     assert EMBEDDING_MAX_ONGOING_REQUESTS == 4

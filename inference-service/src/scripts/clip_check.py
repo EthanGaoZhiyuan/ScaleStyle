@@ -3,15 +3,15 @@
 CLIP Embedding Sanity Check
 
 Verifies that image embeddings can be generated stably with both:
-- LAION CLIP (general-purpose baseline)
-- FashionCLIP (domain-adapted for fashion)
+- CLIP ViT-B/32 via Sentence-Transformers (current runtime model, openai/clip-vit-base-patch32)
+- FashionCLIP (domain-adapted for fashion; future upgrade candidate, not current runtime model)
 
 Usage:
-    python clip_check.py --model laion_clip --image_path ./data/sample.jpg
+    python clip_check.py --model st_clip --image_path ./data/sample.jpg
     python clip_check.py --model fashion_clip --image_path ./data/sample.jpg
 
 Environment variables:
-    VISION_BACKBONE: laion_clip|fashion_clip (default: laion_clip)
+    VISION_BACKBONE: st_clip|fashion_clip (default: st_clip)
 """
 
 import argparse
@@ -33,7 +33,7 @@ MODEL_CONFIGS = {
     },
     "fashion_clip": {
         "model_name": "patrickjohncyh/fashion-clip",
-        "description": "FashionCLIP 2.0 (domain-adapted for fashion, PRODUCTION)",
+        "description": "FashionCLIP 2.0 (domain-adapted for fashion; future upgrade candidate, not current runtime model)",
         "expected_dim": 512,
     },
 }
@@ -57,7 +57,7 @@ def load_model(model_key: str, device: str = "cpu"):
     model = SentenceTransformer(config["model_name"], device=device)
     load_time = time.time() - start_time
 
-    print(f"✅ Model loaded in {load_time:.2f}s")
+    print(f"Model loaded in {load_time:.2f}s")
     return model, config
 
 
@@ -82,7 +82,7 @@ def embed_image(model, image_path: Path, normalize: bool = True):
     embedding_np = embedding.detach().cpu().numpy()
     embedding_np = np.asarray(embedding_np).squeeze()
 
-    print(f"\n⚡ Embedding generated in {embed_time*1000:.2f}ms")
+    print(f"\nEmbedding generated in {embed_time*1000:.2f}ms")
     return embedding_np
 
 
@@ -92,13 +92,13 @@ def analyze_embedding(embedding: np.ndarray, config: dict):
     print("EMBEDDING ANALYSIS")
     print(f"{'='*60}")
 
-    print(f"\n📊 Shape: {embedding.shape}")
+    print(f"\nShape: {embedding.shape}")
     print(f"   Expected dimension: {config['expected_dim']}")
 
     if embedding.shape[0] != config["expected_dim"]:
-        print("   ⚠️  WARNING: Dimension mismatch!")
+        print("   WARNING: Dimension mismatch!")
     else:
-        print("   ✅ Dimension matches expected")
+        print("   Dimension matches expected")
 
     print(f"\n🔢 Dtype: {embedding.dtype}")
 
@@ -106,9 +106,9 @@ def analyze_embedding(embedding: np.ndarray, config: dict):
     l2_norm = np.linalg.norm(embedding)
     print(f"\n📏 L2 Norm: {l2_norm:.6f}")
     if 0.99 <= l2_norm <= 1.01:
-        print("   ✅ Embedding is normalized")
+        print("   Embedding is normalized")
     else:
-        print("   ⚠️  Embedding may not be normalized")
+        print("   Embedding may not be normalized")
 
     # Statistics
     print("\n📈 Statistics:")
@@ -118,7 +118,7 @@ def analyze_embedding(embedding: np.ndarray, config: dict):
     print(f"   Std: {embedding.std():.6f}")
 
     # First 5 values (for reproducibility check)
-    print("\n🔍 First 5 values (for reproducibility):")
+    print("\nFirst 5 values (for reproducibility):")
     for i, val in enumerate(embedding[:5]):
         print(f"   [{i}]: {val:.8f}")
 
@@ -140,7 +140,7 @@ def compute_similarity(model, image_paths: list[Path]):
         embeddings.append(emb)
 
     # Compute pairwise cosine similarities
-    print("\n📊 Cosine Similarities:")
+    print("\nCosine Similarities:")
     for i in range(len(embeddings)):
         for j in range(i + 1, len(embeddings)):
             sim = np.dot(embeddings[i], embeddings[j])
@@ -154,9 +154,9 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        default=os.getenv("VISION_BACKBONE", "fashion_clip"),
+        default=os.getenv("VISION_BACKBONE", "st_clip"),
         choices=list(MODEL_CONFIGS.keys()),
-        help="CLIP model backend to use (default: fashion_clip for production)",
+        help="CLIP model backend to use (default: st_clip, the current runtime model)",
     )
     parser.add_argument(
         "--image_path",

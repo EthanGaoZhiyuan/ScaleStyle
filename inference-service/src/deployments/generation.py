@@ -179,22 +179,22 @@ class GenerationDeployment:
             self.model.eval()
 
             self.init_ms = (time.time() - t0) * 1000
-            logger.info(f"✅ Model loaded successfully in {self.init_ms:.1f}ms")
+            logger.info(f"Model loaded successfully in {self.init_ms:.1f}ms")
 
             # ---- warmup (avoid cold start for first request) ----
             if os.getenv("GENERATION_WARMUP", "1") == "1":
                 try:
-                    logger.info("🔥 Running warmup...")
+                    logger.info("Running warmup...")
                     _ = self._generate_text(
                         "User query: hi. Item: red dress. Explain why in 1 sentence."
                     )
-                    logger.info("✅ Warmup completed")
+                    logger.info("Warmup completed")
                 except Exception as e:
-                    logger.warning(f"⚠️  Warmup failed: {e}")
+                    logger.warning(f"Warmup failed: {e}")
 
         except Exception as e:
             logger.error(
-                f"❌ Failed to load generation model '{self.model_name}': {e}\n"
+                f"Failed to load generation model '{self.model_name}': {e}\n"
                 f"   Falling back to template mode for generation.\n"
                 f"   Possible causes:\n"
                 f"   - Network connectivity issues\n"

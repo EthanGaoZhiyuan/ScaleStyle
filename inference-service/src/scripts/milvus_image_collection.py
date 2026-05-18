@@ -68,7 +68,7 @@ class MilvusImageCollection:
             host=host,
             port=port,
         )
-        logger.info("✅ Connected to Milvus")
+        logger.info("Connected to Milvus")
 
         self.collection = None
 
@@ -140,7 +140,7 @@ class MilvusImageCollection:
             name=self.collection_name,
             schema=schema,
         )
-        logger.info("✅ Collection created")
+        logger.info("Collection created")
 
         # Create HNSW index for fast search
         logger.info("Creating HNSW index on vector field...")
@@ -157,11 +157,11 @@ class MilvusImageCollection:
             field_name="vector",
             index_params=index_params,
         )
-        logger.info("✅ HNSW index created")
+        logger.info("HNSW index created")
 
         # Load collection into memory
         self.collection.load()
-        logger.info("✅ Collection loaded into memory")
+        logger.info("Collection loaded into memory")
 
     def ingest_parquet(
         self,
@@ -248,7 +248,7 @@ class MilvusImageCollection:
         throughput = total_inserted / elapsed if elapsed > 0 else 0
 
         logger.info(f"\n{'='*60}")
-        logger.info("✅ Ingestion complete!")
+        logger.info("Ingestion complete!")
         logger.info(f"   Total inserted: {total_inserted}")
         logger.info(f"   Time elapsed: {elapsed:.2f}s")
         logger.info(f"   Throughput: {throughput:.1f} records/s")
@@ -257,11 +257,11 @@ class MilvusImageCollection:
         # Flush to ensure persistence
         logger.info("Flushing collection...")
         self.collection.flush()
-        logger.info("✅ Collection flushed")
+        logger.info("Collection flushed")
 
         # Verify count
         count = self.collection.num_entities
-        logger.info(f"✅ Collection now has {count} entities")
+        logger.info(f"Collection now has {count} entities")
 
     def test_search(self, k: int = 5):
         """
@@ -387,7 +387,7 @@ def main():
     if args.mode == "test":
         manager.test_search(k=5)
 
-    logger.info("\n✅ All operations completed successfully!")
+    logger.info("\nAll operations completed successfully!")
 
 
 if __name__ == "__main__":

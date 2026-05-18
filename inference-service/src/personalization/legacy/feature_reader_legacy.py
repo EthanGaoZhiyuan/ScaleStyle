@@ -1,3 +1,4 @@
+# LEGACY / DEBUG ONLY — not imported by serving code.
 """
 Legacy fine-grained Redis readers. NOT for request hot path.
 
@@ -15,8 +16,8 @@ import redis
 
 from src.config import RedisConfig
 from src.utils.redis_metadata import canonical_article_id, item_meta_key
-from .feature_reader import FeatureReader
-from .metrics import feature_read_latency_seconds, feature_read_total
+from ..feature_reader import FeatureReader
+from ..metrics import feature_read_latency_seconds, feature_read_total
 
 logger = logging.getLogger(__name__)
 
