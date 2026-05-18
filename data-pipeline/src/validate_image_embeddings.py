@@ -129,6 +129,7 @@ def validate(
 
     # 8. article_id / article_id_str consistency (non-blocking)
     if "article_id_str" in df.columns:
+
         def _normalize(v) -> str:
             return str(int(v)).zfill(10)
 
@@ -150,7 +151,9 @@ def validate(
         missing_paths = df["image_path"].apply(lambda p: not Path(p).exists())
         n_missing = int(missing_paths.sum())
         if n_missing > 0:
-            warnings.append(f"{n_missing} image_path values do not exist on local filesystem")
+            warnings.append(
+                f"{n_missing} image_path values do not exist on local filesystem"
+            )
         else:
             print(f"All {len(df):,} image_path values exist on disk")
 
@@ -240,7 +243,9 @@ def main() -> None:
     args = parser.parse_args()
 
     print(f"\nValidating: {args.input}")
-    print(f"Expected dim: {args.expected_dim}  |  Embedding col: {args.embedding_column}\n")
+    print(
+        f"Expected dim: {args.expected_dim}  |  Embedding col: {args.embedding_column}\n"
+    )
 
     ok = validate(
         args.input,

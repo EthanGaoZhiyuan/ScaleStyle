@@ -222,7 +222,9 @@ def generate_image_embeddings(
         aid = image_path_to_article_id(img_path)
         meta = article_lookup.get(aid)
         if meta is None:
-            logger.warning("No article metadata for image: %s (article_id=%s)", img_path.name, aid)
+            logger.warning(
+                "No article metadata for image: %s (article_id=%s)", img_path.name, aid
+            )
             unmatched_count += 1
         else:
             matched_files.append((img_path, meta))
@@ -245,7 +247,7 @@ def generate_image_embeddings(
             return
         pil_images = [item[0] for item in batch]
         embeddings = encoder.encode_batch(pil_images)
-        for (_, img_path, meta), emb in zip(batch, embeddings):
+        for (_, img_path, meta), emb in zip(batch, embeddings, strict=False):
             row: dict = {
                 "article_id": meta["article_id"],
                 "article_id_str": normalize_article_id(meta["article_id"]),

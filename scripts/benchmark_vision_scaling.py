@@ -34,12 +34,21 @@ DEFAULT_IMAGE = "data-pipeline/data/raw/images/010/0108775015.jpg"
 HYBRID_QUERY = "similar but black"
 
 TEXT_QUERIES = [
-    "black dress", "summer dress", "casual shirt", "denim jeans", "winter coat",
-    "sport jacket", "elegant blouse", "oversized hoodie", "floral skirt", "leather boots",
+    "black dress",
+    "summer dress",
+    "casual shirt",
+    "denim jeans",
+    "winter coat",
+    "sport jacket",
+    "elegant blouse",
+    "oversized hoodie",
+    "floral skirt",
+    "leather boots",
 ]
 
 
 # ---------------------------------------------------------------------------
+
 
 class _Bucket:
     def __init__(self):
@@ -64,10 +73,24 @@ class _Bucket:
         n = len(lats)
         total = n + self.errors
         if not lats:
-            return dict(total=total, ok=0, errors=self.errors, degraded=self.degraded,
-                        p50=None, p95=None, p99=None, avg=None, rps=None, err_pct=100.0, deg_pct=0.0)
+            return dict(
+                total=total,
+                ok=0,
+                errors=self.errors,
+                degraded=self.degraded,
+                p50=None,
+                p95=None,
+                p99=None,
+                avg=None,
+                rps=None,
+                err_pct=100.0,
+                deg_pct=0.0,
+            )
         return dict(
-            total=total, ok=n, errors=self.errors, degraded=self.degraded,
+            total=total,
+            ok=n,
+            errors=self.errors,
+            degraded=self.degraded,
             p50=round(lats[int(n * 0.50)], 1),
             p95=round(lats[int(n * 0.95)], 1),
             p99=round(lats[min(int(n * 0.99), n - 1)], 1),
@@ -92,9 +115,11 @@ def _worker_image(gw: str, image_b64: str, bucket: _Bucket, stop: threading.Even
         while not stop.is_set():
             try:
                 t0 = time.perf_counter()
-                r = sess.post(f"{gw}/api/recommendation/search/image",
-                              json={"image_base64": image_b64, "k": 5, "mode": "image_to_image"},
-                              timeout=10)
+                r = sess.post(
+                    f"{gw}/api/recommendation/search/image",
+                    json={"image_base64": image_b64, "k": 5, "mode": "image_to_image"},
+                    timeout=10,
+                )
                 ms = (time.perf_counter() - t0) * 1000
                 r.raise_for_status()
                 bucket.record(ms, _is_degraded(r.json()))
@@ -102,7 +127,9 @@ def _worker_image(gw: str, image_b64: str, bucket: _Bucket, stop: threading.Even
                 bucket.error()
 
 
-def _worker_hybrid(gw: str, image_b64: str, bucket: _Bucket, stop: threading.Event, counter: list):
+def _worker_hybrid(
+    gw: str, image_b64: str, bucket: _Bucket, stop: threading.Event, counter: list
+):
     with requests.Session() as sess:
         while not stop.is_set():
             with threading.Lock():
@@ -111,17 +138,19 @@ def _worker_hybrid(gw: str, image_b64: str, bucket: _Bucket, stop: threading.Eve
             query = TEXT_QUERIES[idx % len(TEXT_QUERIES)]
             try:
                 t0 = time.perf_counter()
-                r = sess.post(f"{gw}/api/recommendation/search/hybrid",
-                              json={
-                                  "image_base64": image_b64,
-                                  "query": f"similar but {query.split()[-1]}",
-                                  "k": 5,
-                                  "userId": "vision-bench-user",
-                                  "image_weight": 0.5,
-                                  "text_weight": 0.4,
-                                  "behavior_weight": 0.1,
-                              },
-                              timeout=10)
+                r = sess.post(
+                    f"{gw}/api/recommendation/search/hybrid",
+                    json={
+                        "image_base64": image_b64,
+                        "query": f"similar but {query.split()[-1]}",
+                        "k": 5,
+                        "userId": "vision-bench-user",
+                        "image_weight": 0.5,
+                        "text_weight": 0.4,
+                        "behavior_weight": 0.1,
+                    },
+                    timeout=10,
+                )
                 ms = (time.perf_counter() - t0) * 1000
                 r.raise_for_status()
                 bucket.record(ms, _is_degraded(r.json()))
@@ -129,12 +158,12 @@ def _worker_hybrid(gw: str, image_b64: str, bucket: _Bucket, stop: threading.Eve
                 bucket.error()
 
 
-def run_endpoint(endpoint: str, concurrency: int, duration: int,
-                 gw: str, image_b64: str) -> dict:
+def run_endpoint(
+    endpoint: str, concurrency: int, duration: int, gw: str, image_b64: str
+) -> dict:
     bucket = _Bucket()
     stop = threading.Event()
     counter = [0]
-    counter_lock = threading.Lock()
 
     if endpoint == "image":
         target = _worker_image
@@ -163,10 +192,12 @@ def _fmt(v):
 
 
 def print_result(label: str, endpoint: str, c: int, st: dict):
-    print(f"  [{label}] {endpoint} c={c:>2}  "
-          f"total={st['total']:>4}  rps={st['rps']:>5}  "
-          f"p50={_fmt(st['p50']):>6}ms  p95={_fmt(st['p95']):>6}ms  p99={_fmt(st['p99']):>6}ms  "
-          f"err={st['err_pct']:>4}%  deg={st['deg_pct']:>5}%")
+    print(
+        f"  [{label}] {endpoint} c={c:>2}  "
+        f"total={st['total']:>4}  rps={st['rps']:>5}  "
+        f"p50={_fmt(st['p50']):>6}ms  p95={_fmt(st['p95']):>6}ms  p99={_fmt(st['p99']):>6}ms  "
+        f"err={st['err_pct']:>4}%  deg={st['deg_pct']:>5}%"
+    )
 
 
 def main():
@@ -203,7 +234,9 @@ def main():
         for ep in ("image", "hybrid"):
             key = f"{ep}_c{c}"
             if args.warmup > 0:
-                print(f"  warming up {ep} c={c} ({args.warmup}s)...", end=" ", flush=True)
+                print(
+                    f"  warming up {ep} c={c} ({args.warmup}s)...", end=" ", flush=True
+                )
                 run_endpoint(ep, c, args.warmup, gw, image_b64)
                 print("done")
             print(f"  measuring {ep} c={c} ({args.duration}s)...", end=" ", flush=True)

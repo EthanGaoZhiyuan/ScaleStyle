@@ -42,16 +42,28 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 MIX = [
-    ("text",   0.70),
-    ("image",  0.15),
+    ("text", 0.70),
+    ("image", 0.15),
     ("hybrid", 0.10),
-    ("click",  0.05),
+    ("click", 0.05),
 ]
 
 TEXT_QUERIES = [
-    "black dress", "summer dress", "casual shirt", "denim jeans", "winter coat",
-    "sport jacket", "elegant blouse", "oversized hoodie", "floral skirt", "leather boots",
-    "red top", "white blouse", "fitted trousers", "knit sweater", "midi skirt",
+    "black dress",
+    "summer dress",
+    "casual shirt",
+    "denim jeans",
+    "winter coat",
+    "sport jacket",
+    "elegant blouse",
+    "oversized hoodie",
+    "floral skirt",
+    "leather boots",
+    "red top",
+    "white blouse",
+    "fitted trousers",
+    "knit sweater",
+    "midi skirt",
 ]
 
 CLICK_SOURCES = ["search", "image_search", "hybrid_search"]
@@ -59,13 +71,22 @@ CLICK_SOURCES = ["search", "image_search", "hybrid_search"]
 # Items to use for click events — seeded from real catalog IDs; supplemented
 # at runtime with IDs observed in search responses.
 _SEED_ITEM_IDS = [
-    "0827955002", "0735439001", "0591564001", "0693143002", "0921697005",
-    "0706016001", "0706016002", "0372860001", "0610776002", "0759871002",
+    "0827955002",
+    "0735439001",
+    "0591564001",
+    "0693143002",
+    "0921697005",
+    "0706016001",
+    "0706016002",
+    "0372860001",
+    "0610776002",
+    "0759871002",
 ]
 
 # ---------------------------------------------------------------------------
 # Shared mutable state (thread-safe via lock)
 # ---------------------------------------------------------------------------
+
 
 class _SharedState:
     def __init__(self):
@@ -88,6 +109,7 @@ class _SharedState:
 # ---------------------------------------------------------------------------
 # Per-endpoint result buckets
 # ---------------------------------------------------------------------------
+
 
 class Bucket:
     def __init__(self, name: str):
@@ -115,9 +137,17 @@ class Bucket:
         total = ok + self.errors
         if not lats:
             return {
-                "name": self.name, "total": total, "ok": 0, "errors": self.errors,
-                "degraded": self.degraded, "p50": None, "p95": None, "p99": None,
-                "avg": None, "min": None, "max": None,
+                "name": self.name,
+                "total": total,
+                "ok": 0,
+                "errors": self.errors,
+                "degraded": self.degraded,
+                "p50": None,
+                "p95": None,
+                "p99": None,
+                "avg": None,
+                "min": None,
+                "max": None,
                 "error_pct": 100.0 if self.errors else 0.0,
                 "degraded_pct": 0.0,
             }
@@ -142,12 +172,15 @@ class Bucket:
 # Request helpers
 # ---------------------------------------------------------------------------
 
+
 def _b64_image(path: Path) -> str:
     return base64.b64encode(path.read_bytes()).decode()
 
 
 def _is_degraded_list(data: list) -> bool:
-    return any(bool(item.get("degraded") or item.get("degradedReason")) for item in data)
+    return any(
+        bool(item.get("degraded") or item.get("degradedReason")) for item in data
+    )
 
 
 def _is_degraded_dict(data: dict) -> bool:
@@ -168,21 +201,29 @@ def _extract_item_ids(body: dict) -> list[str]:
     if isinstance(data, list):
         return [item.get("itemId", "") for item in data if item.get("itemId")]
     if isinstance(data, dict):
-        return [item.get("itemId", "") for item in data.get("items", []) if item.get("itemId")]
+        return [
+            item.get("itemId", "")
+            for item in data.get("items", [])
+            if item.get("itemId")
+        ]
     return []
 
 
 def do_text(session: requests.Session, gw: str, idx: int) -> tuple[float, bool]:
     query = TEXT_QUERIES[idx % len(TEXT_QUERIES)]
     t0 = time.perf_counter()
-    r = session.get(f"{gw}/api/recommendation/search", params={"query": query, "k": 5}, timeout=5)
+    r = session.get(
+        f"{gw}/api/recommendation/search", params={"query": query, "k": 5}, timeout=5
+    )
     ms = (time.perf_counter() - t0) * 1000
     r.raise_for_status()
     body = r.json()
     return ms, _is_degraded(body), _extract_item_ids(body)
 
 
-def do_image(session: requests.Session, gw: str, image_b64: str) -> tuple[float, bool, list]:
+def do_image(
+    session: requests.Session, gw: str, image_b64: str
+) -> tuple[float, bool, list]:
     t0 = time.perf_counter()
     r = session.post(
         f"{gw}/api/recommendation/search/image",
@@ -195,7 +236,9 @@ def do_image(session: requests.Session, gw: str, image_b64: str) -> tuple[float,
     return ms, _is_degraded(body), _extract_item_ids(body)
 
 
-def do_hybrid(session: requests.Session, gw: str, image_b64: str, idx: int) -> tuple[float, bool, list]:
+def do_hybrid(
+    session: requests.Session, gw: str, image_b64: str, idx: int
+) -> tuple[float, bool, list]:
     query = TEXT_QUERIES[idx % len(TEXT_QUERIES)]
     t0 = time.perf_counter()
     r = session.post(
@@ -217,7 +260,9 @@ def do_hybrid(session: requests.Session, gw: str, image_b64: str, idx: int) -> t
     return ms, _is_degraded(body), _extract_item_ids(body)
 
 
-def do_click(session: requests.Session, gw: str, state: _SharedState, idx: int) -> tuple[float, bool]:
+def do_click(
+    session: requests.Session, gw: str, state: _SharedState, idx: int
+) -> tuple[float, bool]:
     item_id = state.random_item_id()
     source = CLICK_SOURCES[idx % len(CLICK_SOURCES)]
     query = TEXT_QUERIES[idx % len(TEXT_QUERIES)] if source == "search" else None
@@ -241,6 +286,7 @@ def do_click(session: requests.Session, gw: str, state: _SharedState, idx: int) 
 # ---------------------------------------------------------------------------
 # Worker
 # ---------------------------------------------------------------------------
+
 
 def _build_thresholds(mix: list[tuple[str, float]]) -> list[tuple[str, float]]:
     """Convert probability mix to cumulative thresholds for random dispatch."""
@@ -303,6 +349,7 @@ def worker(
 # Runner
 # ---------------------------------------------------------------------------
 
+
 def run_mixed(
     gw: str,
     image_b64: str,
@@ -320,8 +367,15 @@ def run_mixed(
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         futures = [
             pool.submit(
-                worker, gw, image_b64, thresholds, buckets, state,
-                stop_event, counter, counter_lock,
+                worker,
+                gw,
+                image_b64,
+                thresholds,
+                buckets,
+                state,
+                stop_event,
+                counter,
+                counter_lock,
             )
             for _ in range(concurrency)
         ]
@@ -340,22 +394,27 @@ def run_mixed(
     search_lats.sort()
     n = len(search_lats)
     total_all = sum(r["total"] for r in results.values())
-    total_errs = sum(r["errors"] for r in results.values())
     total_deg = sum(r["degraded"] for r in results.values() if r["name"] != "click")
     total_ok_search = sum(r["ok"] for r in results.values() if r["name"] != "click")
 
     results["__aggregate__"] = {
         "total_all": total_all,
-        "total_search": n + sum(buckets[nm].errors for nm in ("text","image","hybrid")),
+        "total_search": n
+        + sum(buckets[nm].errors for nm in ("text", "image", "hybrid")),
         "elapsed_sec": round(elapsed, 1),
         "throughput_all": round(total_all / elapsed, 1),
         "throughput_search": round(n / elapsed, 1),
-        "search_errors": sum(buckets[nm].errors for nm in ("text","image","hybrid")),
+        "search_errors": sum(buckets[nm].errors for nm in ("text", "image", "hybrid")),
         "search_degraded": total_deg,
         "search_error_pct": round(
-            sum(buckets[nm].errors for nm in ("text","image","hybrid"))
-            / max(sum(buckets[nm].stats()["total"] for nm in ("text","image","hybrid")), 1)
-            * 100, 1),
+            sum(buckets[nm].errors for nm in ("text", "image", "hybrid"))
+            / max(
+                sum(buckets[nm].stats()["total"] for nm in ("text", "image", "hybrid")),
+                1,
+            )
+            * 100,
+            1,
+        ),
         "search_degraded_pct": round(total_deg / max(total_ok_search, 1) * 100, 1),
         "p50": round(search_lats[int(n * 0.50)], 1) if n else None,
         "p95": round(search_lats[int(n * 0.95)], 1) if n else None,
@@ -368,6 +427,7 @@ def run_mixed(
 # Formatting helpers
 # ---------------------------------------------------------------------------
 
+
 def _fmt(v, unit=""):
     return f"{v}{unit}" if v is not None else "N/A"
 
@@ -377,41 +437,55 @@ def print_table(results: dict, concurrency: int, duration_sec: int):
     print(f"\n{'═'*70}")
     print(f"  MIXED WORKLOAD — c={concurrency}, {duration_sec}s")
     print(f"{'═'*70}")
-    print(f"  Total req={agg['total_all']}  elapsed={agg['elapsed_sec']}s  "
-          f"tput_all={agg['throughput_all']}rps  tput_search={agg['throughput_search']}rps")
-    print(f"  Search aggregate: p50={_fmt(agg['p50'],'ms')}  p95={_fmt(agg['p95'],'ms')}  "
-          f"p99={_fmt(agg['p99'],'ms')}  err%={agg['search_error_pct']}  "
-          f"deg%={agg['search_degraded_pct']}")
+    print(
+        f"  Total req={agg['total_all']}  elapsed={agg['elapsed_sec']}s  "
+        f"tput_all={agg['throughput_all']}rps  tput_search={agg['throughput_search']}rps"
+    )
+    print(
+        f"  Search aggregate: p50={_fmt(agg['p50'],'ms')}  p95={_fmt(agg['p95'],'ms')}  "
+        f"p99={_fmt(agg['p99'],'ms')}  err%={agg['search_error_pct']}  "
+        f"deg%={agg['search_degraded_pct']}"
+    )
     print()
-    print(f"  {'Endpoint':<8}  {'total':>5}  {'p50':>6}  {'p95':>6}  {'p99':>6}  {'err%':>5}  {'deg%':>5}")
+    print(
+        f"  {'Endpoint':<8}  {'total':>5}  {'p50':>6}  {'p95':>6}  {'p99':>6}  {'err%':>5}  {'deg%':>5}"
+    )
     print("  " + "─" * 56)
     for name in ("text", "image", "hybrid", "click"):
         r = results[name]
         p50 = _fmt(r["p50"], "ms") if r["p50"] is not None else "  N/A "
         p95 = _fmt(r["p95"], "ms") if r["p95"] is not None else "  N/A "
         p99 = _fmt(r["p99"], "ms") if r["p99"] is not None else "  N/A "
-        print(f"  {name:<8}  {r['total']:>5}  {p50:>6}  {p95:>6}  {p99:>6}  "
-              f"{r['error_pct']:>5}  {r['degraded_pct']:>5}")
+        print(
+            f"  {name:<8}  {r['total']:>5}  {p50:>6}  {p95:>6}  {p99:>6}  "
+            f"{r['error_pct']:>5}  {r['degraded_pct']:>5}"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Markdown append
 # ---------------------------------------------------------------------------
 
+
 def _append_markdown(path: Path, c10: dict, c25: dict, image_name: str, ts: str):
     """Appends the Mixed Workload section to an existing markdown report."""
+
     def _row(r: dict, elapsed: float):
         rps = round(r["ok"] / max(elapsed, 1), 1)
         p50 = _fmt(r["p50"])
         p95 = _fmt(r["p95"])
         p99 = _fmt(r["p99"])
-        return (f"| {r['name']} | {r['total']} | {rps} | "
-                f"{p50} | {p95} | {p99} | {r['error_pct']}% | {r['degraded_pct']}% |")
+        return (
+            f"| {r['name']} | {r['total']} | {rps} | "
+            f"{p50} | {p95} | {p99} | {r['error_pct']}% | {r['degraded_pct']}% |"
+        )
 
     def _agg_row(agg: dict, label: str):
-        return (f"| **{label}** | {agg['total_all']} | {agg['throughput_all']} | "
-                f"{_fmt(agg['p50'])} | {_fmt(agg['p95'])} | {_fmt(agg['p99'])} | "
-                f"{agg['search_error_pct']}% | {agg['search_degraded_pct']}% |")
+        return (
+            f"| **{label}** | {agg['total_all']} | {agg['throughput_all']} | "
+            f"{_fmt(agg['p50'])} | {_fmt(agg['p95'])} | {_fmt(agg['p99'])} | "
+            f"{agg['search_error_pct']}% | {agg['search_degraded_pct']}% |"
+        )
 
     a10 = c10["__aggregate__"]
     a25 = c25["__aggregate__"]
@@ -479,7 +553,7 @@ def _append_markdown(path: Path, c10: dict, c25: dict, image_name: str, ts: str)
     # Remove old mixed workload section if present
     marker = "\n## Mixed Workload Benchmark"
     if marker in existing:
-        existing = existing[:existing.index(marker)]
+        existing = existing[: existing.index(marker)]
     path.write_text(existing.rstrip() + "\n" + "\n".join(section) + "\n")
 
 
@@ -487,14 +561,22 @@ def _append_markdown(path: Path, c10: dict, c25: dict, image_name: str, ts: str)
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     ap = argparse.ArgumentParser(description="ScaleStyle mixed-workload benchmark")
     ap.add_argument("--concurrency", type=int, default=10)
     ap.add_argument("--duration-seconds", type=int, default=60)
-    ap.add_argument("--gateway-url", default=os.getenv("GATEWAY_URL", "http://localhost:8080"))
-    ap.add_argument("--image-path", default="data-pipeline/data/raw/images/010/0108775015.jpg")
-    ap.add_argument("--output", default="",
-                    help="When set, run c=10 then c=25 and append both to this markdown file")
+    ap.add_argument(
+        "--gateway-url", default=os.getenv("GATEWAY_URL", "http://localhost:8080")
+    )
+    ap.add_argument(
+        "--image-path", default="data-pipeline/data/raw/images/010/0108775015.jpg"
+    )
+    ap.add_argument(
+        "--output",
+        default="",
+        help="When set, run c=10 then c=25 and append both to this markdown file",
+    )
     args = ap.parse_args()
 
     gw = args.gateway_url

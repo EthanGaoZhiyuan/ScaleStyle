@@ -1,10 +1,9 @@
 """Tests for MetricsRecorder."""
+
 import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
-
-import pytest
 
 os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", "test-kafka:9093")
 os.environ.setdefault("CONSUMER_MODE", "primary")
@@ -33,7 +32,9 @@ def _make_histogram():
 def test_record_event_applied_increments_processed_and_latency():
     proc = _make_counter()
     lat = _make_histogram()
-    rec = MetricsRecorder(events_processed_total=proc, event_processing_latency_seconds=lat)
+    rec = MetricsRecorder(
+        events_processed_total=proc, event_processing_latency_seconds=lat
+    )
     rec.record_event_applied(0.042)
     proc.labels.assert_called_once_with(result="applied")
     proc.labels().inc.assert_called_once()

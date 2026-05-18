@@ -92,9 +92,7 @@ class RedisClient:
                         logger.info("Redis connection pool initialized successfully")
 
                     except Exception as e:
-                        logger.error(
-                            "Failed to connect to Redis: %s", e, exc_info=True
-                        )
+                        logger.error("Failed to connect to Redis: %s", e, exc_info=True)
                         raise
 
         return cls._client

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import json
 import os
 import statistics
 import sys
@@ -23,7 +22,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 try:
     import requests
@@ -36,10 +34,12 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 GATEWAY = os.getenv("GATEWAY_URL", "http://localhost:8080")
-IMAGE_PATH = Path(os.getenv(
-    "BENCHMARK_IMAGE_PATH",
-    "data-pipeline/data/raw/images/010/0108775015.jpg",
-))
+IMAGE_PATH = Path(
+    os.getenv(
+        "BENCHMARK_IMAGE_PATH",
+        "data-pipeline/data/raw/images/010/0108775015.jpg",
+    )
+)
 
 TEXT_QUERIES = [
     "black dress",
@@ -59,11 +59,14 @@ TEXT_QUERIES = [
 # Request helpers
 # ---------------------------------------------------------------------------
 
+
 def _b64_image(path: Path) -> str:
     return base64.b64encode(path.read_bytes()).decode()
 
 
-def request_text(session: requests.Session, query: str, k: int = 5) -> tuple[float, dict]:
+def request_text(
+    session: requests.Session, query: str, k: int = 5
+) -> tuple[float, dict]:
     t0 = time.perf_counter()
     r = session.get(
         f"{GATEWAY}/api/recommendation/search",
@@ -75,7 +78,9 @@ def request_text(session: requests.Session, query: str, k: int = 5) -> tuple[flo
     return ms, r.json()
 
 
-def request_image(session: requests.Session, image_b64: str, k: int = 5) -> tuple[float, dict]:
+def request_image(
+    session: requests.Session, image_b64: str, k: int = 5
+) -> tuple[float, dict]:
     t0 = time.perf_counter()
     r = session.post(
         f"{GATEWAY}/api/recommendation/search/image",
@@ -117,6 +122,7 @@ def request_hybrid(
 # Stats
 # ---------------------------------------------------------------------------
 
+
 def _stats(latencies: list[float]) -> dict:
     if not latencies:
         return {}
@@ -136,7 +142,9 @@ def _stats(latencies: list[float]) -> dict:
 def _is_degraded(body: dict) -> bool:
     data = body.get("data", body)
     if isinstance(data, list):
-        return any(bool(item.get("degraded") or item.get("degradedReason")) for item in data)
+        return any(
+            bool(item.get("degraded") or item.get("degradedReason")) for item in data
+        )
     if isinstance(data, dict):
         return bool(data.get("degraded") or data.get("degraded_reason"))
     return False
@@ -145,6 +153,7 @@ def _is_degraded(body: dict) -> bool:
 # ---------------------------------------------------------------------------
 # Single-endpoint benchmark
 # ---------------------------------------------------------------------------
+
 
 def bench_endpoint(
     name: str,
@@ -174,7 +183,7 @@ def bench_endpoint(
                 fn(session, i)
             except Exception:
                 pass
-        print(f"  warm-up done")
+        print("  warm-up done")
 
         # Measurement
         for i in range(n):
@@ -209,6 +218,7 @@ def bench_endpoint(
 # Concurrency pressure test
 # ---------------------------------------------------------------------------
 
+
 def bench_concurrency(
     name: str,
     fn,
@@ -226,7 +236,6 @@ def bench_concurrency(
     stop_at = time.monotonic() + duration_sec
 
     counter = {"i": 0}
-    lock_err = {"n": 0}
 
     def worker():
         with requests.Session() as s:
@@ -241,7 +250,6 @@ def bench_concurrency(
                 except Exception:
                     error_list.append(1)
 
-    latencies_lock = latencies
     degraded_list: list = []
     error_list: list = []
 
@@ -267,17 +275,22 @@ def bench_concurrency(
         "degraded_rate": round(degraded / max(len(latencies), 1) * 100, 1),
         "throughput_rps": throughput,
     }
+
     def _fmt(v):
         return f"{v:6.1f}" if v is not None else "   N/A"
-    print(f"  c={concurrency:2d}  total={total:4d}  tput={throughput:5.1f}rps  "
-          f"p50={_fmt(st.get('p50'))}  p95={_fmt(st.get('p95'))}  p99={_fmt(st.get('p99'))}  "
-          f"err={errors}  deg={degraded}")
+
+    print(
+        f"  c={concurrency:2d}  total={total:4d}  tput={throughput:5.1f}rps  "
+        f"p50={_fmt(st.get('p50'))}  p95={_fmt(st.get('p95'))}  p99={_fmt(st.get('p99'))}  "
+        f"err={errors}  deg={degraded}"
+    )
     return result
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main():
     _default_gw = os.getenv("GATEWAY_URL", "http://localhost:8080")
@@ -321,18 +334,24 @@ def main():
         return request_hybrid(s, image_b64)
 
     # ── Part 5: single-endpoint latency ───────────────────────────────────
-    print("\n" + "═"*60)
+    print("\n" + "═" * 60)
     print("  PART 5 — Single-endpoint latency")
-    print("═"*60)
+    print("═" * 60)
 
-    r_text = bench_endpoint("TEXT SEARCH (200 req, 20 warmup)", text_fn, warmup=20, n=200)
-    r_image = bench_endpoint("IMAGE SEARCH (100 req, 10 warmup)", image_fn, warmup=10, n=100)
-    r_hybrid = bench_endpoint("HYBRID SEARCH (100 req, 10 warmup)", hybrid_fn, warmup=10, n=100)
+    r_text = bench_endpoint(
+        "TEXT SEARCH (200 req, 20 warmup)", text_fn, warmup=20, n=200
+    )
+    r_image = bench_endpoint(
+        "IMAGE SEARCH (100 req, 10 warmup)", image_fn, warmup=10, n=100
+    )
+    r_hybrid = bench_endpoint(
+        "HYBRID SEARCH (100 req, 10 warmup)", hybrid_fn, warmup=10, n=100
+    )
 
     # ── Part 6: concurrency pressure ──────────────────────────────────────
-    print("\n" + "═"*60)
+    print("\n" + "═" * 60)
     print("  PART 6 — Concurrency pressure (30s per level)")
-    print("═"*60)
+    print("═" * 60)
 
     concurrency_levels = [1, 5, 10, 25]
     conc_text: list[dict] = []
@@ -341,68 +360,108 @@ def main():
 
     print("\n  TEXT SEARCH")
     for c in concurrency_levels:
-        conc_text.append(bench_concurrency("text", text_fn, concurrency=c, duration_sec=30))
+        conc_text.append(
+            bench_concurrency("text", text_fn, concurrency=c, duration_sec=30)
+        )
 
     print("\n  IMAGE SEARCH")
     for c in concurrency_levels:
-        conc_image.append(bench_concurrency("image", image_fn, concurrency=c, duration_sec=30))
+        conc_image.append(
+            bench_concurrency("image", image_fn, concurrency=c, duration_sec=30)
+        )
 
     print("\n  HYBRID SEARCH")
     for c in concurrency_levels:
-        conc_hybrid.append(bench_concurrency("hybrid", hybrid_fn, concurrency=c, duration_sec=30))
+        conc_hybrid.append(
+            bench_concurrency("hybrid", hybrid_fn, concurrency=c, duration_sec=30)
+        )
 
     # ── Part 7: VisionDeployment concurrency sanity ────────────────────────
-    print("\n" + "═"*60)
+    print("\n" + "═" * 60)
     print("  PART 7 — VisionDeployment event-loop sanity (c=10, 30s)")
-    print("═"*60)
+    print("═" * 60)
 
     print("\n  IMAGE (c=10)")
-    r_img_c10 = bench_concurrency("image-c10", image_fn, concurrency=10, duration_sec=30)
+    r_img_c10 = bench_concurrency(
+        "image-c10", image_fn, concurrency=10, duration_sec=30
+    )
     print("\n  HYBRID (c=10)")
-    r_hyb_c10 = bench_concurrency("hybrid-c10", hybrid_fn, concurrency=10, duration_sec=30)
+    r_hyb_c10 = bench_concurrency(
+        "hybrid-c10", hybrid_fn, concurrency=10, duration_sec=30
+    )
 
     # ── Print summary ──────────────────────────────────────────────────────
-    print("\n" + "═"*60)
+    print("\n" + "═" * 60)
     print("  SUMMARY")
-    print("═"*60)
-    print(f"\nSingle-endpoint latency  (ms):")
-    print(f"  {'Endpoint':<12}  {'p50':>6}  {'p95':>6}  {'p99':>6}  {'avg':>6}  {'max':>6}  {'err%':>5}  {'deg%':>5}  {'rps':>6}")
+    print("═" * 60)
+    print("\nSingle-endpoint latency  (ms):")
+    print(
+        f"  {'Endpoint':<12}  {'p50':>6}  {'p95':>6}  {'p99':>6}  {'avg':>6}  {'max':>6}  {'err%':>5}  {'deg%':>5}  {'rps':>6}"
+    )
     for name, r in [("text", r_text), ("image", r_image), ("hybrid", r_hybrid)]:
-        print(f"  {name:<12}  {r.get('p50','?'):>6}  {r.get('p95','?'):>6}  {r.get('p99','?'):>6}  "
-              f"{r.get('avg','?'):>6}  {r.get('max','?'):>6}  {r.get('error_rate','?'):>5}  "
-              f"{r.get('degraded_rate','?'):>5}  {r.get('throughput_rps','?'):>6}")
+        print(
+            f"  {name:<12}  {r.get('p50','?'):>6}  {r.get('p95','?'):>6}  {r.get('p99','?'):>6}  "
+            f"{r.get('avg','?'):>6}  {r.get('max','?'):>6}  {r.get('error_rate','?'):>5}  "
+            f"{r.get('degraded_rate','?'):>5}  {r.get('throughput_rps','?'):>6}"
+        )
 
-    print(f"\nConcurrency pressure  (30s, p50/p95/p99 in ms):")
-    print(f"  {'Endpoint':<8}  {'c':>3}  {'total':>6}  {'rps':>6}  {'p50':>6}  {'p95':>6}  {'p99':>6}  {'err%':>5}")
-    for name, rows in [("text", conc_text), ("image", conc_image), ("hybrid", conc_hybrid)]:
+    print("\nConcurrency pressure  (30s, p50/p95/p99 in ms):")
+    print(
+        f"  {'Endpoint':<8}  {'c':>3}  {'total':>6}  {'rps':>6}  {'p50':>6}  {'p95':>6}  {'p99':>6}  {'err%':>5}"
+    )
+    for name, rows in [
+        ("text", conc_text),
+        ("image", conc_image),
+        ("hybrid", conc_hybrid),
+    ]:
         for r in rows:
-            print(f"  {name:<8}  {r.get('concurrency'):>3}  {r.get('total_requests','?'):>6}  "
-                  f"{r.get('throughput_rps','?'):>6}  {r.get('p50','?'):>6}  {r.get('p95','?'):>6}  "
-                  f"{r.get('p99','?'):>6}  {r.get('error_rate','?'):>5}")
+            print(
+                f"  {name:<8}  {r.get('concurrency'):>3}  {r.get('total_requests','?'):>6}  "
+                f"{r.get('throughput_rps','?'):>6}  {r.get('p50','?'):>6}  {r.get('p95','?'):>6}  "
+                f"{r.get('p99','?'):>6}  {r.get('error_rate','?'):>5}"
+            )
 
     # ── Write report ────────────────────────────────────────────────────────
     if args.output:
         out = Path(args.output)
         out.parent.mkdir(parents=True, exist_ok=True)
         _write_markdown(
-            out, ts, image_path,
-            r_text, r_image, r_hybrid,
-            conc_text, conc_image, conc_hybrid,
-            r_img_c10, r_hyb_c10,
+            out,
+            ts,
+            image_path,
+            r_text,
+            r_image,
+            r_hybrid,
+            conc_text,
+            conc_image,
+            conc_hybrid,
+            r_img_c10,
+            r_hyb_c10,
         )
         print(f"\nReport written to: {out}")
 
     return {
-        "text": r_text, "image": r_image, "hybrid": r_hybrid,
-        "conc_text": conc_text, "conc_image": conc_image, "conc_hybrid": conc_hybrid,
+        "text": r_text,
+        "image": r_image,
+        "hybrid": r_hybrid,
+        "conc_text": conc_text,
+        "conc_image": conc_image,
+        "conc_hybrid": conc_hybrid,
     }
 
 
 def _write_markdown(
-    path: Path, ts: str, image_path: Path,
-    r_text: dict, r_image: dict, r_hybrid: dict,
-    conc_text: list, conc_image: list, conc_hybrid: list,
-    r_img_c10: dict, r_hyb_c10: dict,
+    path: Path,
+    ts: str,
+    image_path: Path,
+    r_text: dict,
+    r_image: dict,
+    r_hybrid: dict,
+    conc_text: list,
+    conc_image: list,
+    conc_hybrid: list,
+    r_img_c10: dict,
+    r_hyb_c10: dict,
 ):
     lines = [
         f"# ScaleStyle Local Performance — {ts[:10]}",
@@ -439,11 +498,11 @@ def _write_markdown(
         "",
         "| Parameter | Text | Image | Hybrid |",
         "|---|---|---|---|",
-        f"| Warm-up requests | 20 | 10 | 10 |",
-        f"| Measured requests | 200 | 100 | 100 |",
+        "| Warm-up requests | 20 | 10 | 10 |",
+        "| Measured requests | 200 | 100 | 100 |",
         f"| Image used | — | {image_path.name} | {image_path.name} |",
         "| Query | rotating 10 queries | — | similar but black |",
-        f"| Concurrency pressure | 1/5/10/25 × 30s | 1/5/10/25 × 30s | 1/5/10/25 × 30s |",
+        "| Concurrency pressure | 1/5/10/25 × 30s | 1/5/10/25 × 30s | 1/5/10/25 × 30s |",
         "",
         "## Part 5 — Single-Endpoint Latency",
         "",
@@ -468,7 +527,11 @@ def _write_markdown(
         "|---|---|---|---|---|---|---|---|---|",
     ]
 
-    for name, rows in [("text", conc_text), ("image", conc_image), ("hybrid", conc_hybrid)]:
+    for name, rows in [
+        ("text", conc_text),
+        ("image", conc_image),
+        ("hybrid", conc_hybrid),
+    ]:
         for r in rows:
             lines.append(
                 f"| {name} | {r.get('concurrency')} | {r.get('total_requests')} | "

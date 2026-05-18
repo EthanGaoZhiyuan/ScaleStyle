@@ -271,7 +271,9 @@ def benchmark_one(
         _ = embed("warmup query", True)
         warmups.append((time.perf_counter() - t0) * 1000)
     warmup_avg = statistics.mean(warmups)
-    print(f"[{key}] Warmup avg: {warmup_avg:.1f} ms (runs: {[f'{w:.0f}' for w in warmups]})")
+    print(
+        f"[{key}] Warmup avg: {warmup_avg:.1f} ms (runs: {[f'{w:.0f}' for w in warmups]})"
+    )
 
     # Steady-state measurement
     print(f"[{key}] Measuring {runs} query embeds…")
@@ -448,9 +450,7 @@ def render_markdown(report: BenchmarkReport) -> str:
         "| Model | Params | Dim | Load (ms) | p50 (ms) | p95 (ms) | "
         "p99 (ms) | Mean (ms) | QPS (1-thread) | RSS Δ (MB) |"
     )
-    lines.append(
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
-    )
+    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in lat:
         lines.append(
             f"| `{r.name}` | {r.params_m}M | {r.dim} | "
@@ -495,7 +495,9 @@ def render_markdown(report: BenchmarkReport) -> str:
         "is the gating signal."
     )
     lines.append("")
-    lines.append("| Model | p99 embed (ms) | Fits 600ms Reactor deadline? | Headroom for retrieval+rerank |")
+    lines.append(
+        "| Model | p99 embed (ms) | Fits 600ms Reactor deadline? | Headroom for retrieval+rerank |"
+    )
     lines.append("|---|---:|:---:|---:|")
     for r in lat:
         gateway_budget = 600
@@ -503,9 +505,7 @@ def render_markdown(report: BenchmarkReport) -> str:
         retrieval_rerank_floor = 50  # reasonable warm-cache floor
         headroom = gateway_budget - r.p99_ms - retrieval_rerank_floor
         fits = "yes" if headroom > 0 else "no"
-        lines.append(
-            f"| `{r.name}` | {r.p99_ms:.0f} | {fits} | {headroom:.0f} ms |"
-        )
+        lines.append(f"| `{r.name}` | {r.p99_ms:.0f} | {fits} | {headroom:.0f} ms |")
     lines.append("")
     lines.append(
         "_Headroom = 600ms − p99(embed) − 50ms (warm retrieval+rerank floor). "
@@ -577,9 +577,7 @@ def main() -> int:
 
     # Decide whether to load the article corpus. We need it iff we plan to do
     # top-K agreement AND we have at least 2 models AND the CSV exists.
-    do_topk = (
-        not args.no_topk and len(args.models) >= 2 and args.articles_csv.exists()
-    )
+    do_topk = not args.no_topk and len(args.models) >= 2 and args.articles_csv.exists()
     articles: Optional[list[str]] = None
     if do_topk:
         try:
@@ -594,7 +592,10 @@ def main() -> int:
             else:
                 print(f"Loaded {len(articles)} articles from {args.articles_csv}")
         except Exception as e:  # noqa: BLE001
-            print(f"Could not load articles: {e}; skipping top-K agreement.", file=sys.stderr)
+            print(
+                f"Could not load articles: {e}; skipping top-K agreement.",
+                file=sys.stderr,
+            )
             articles = None
             do_topk = False
     elif not args.no_topk:
@@ -622,8 +623,10 @@ def main() -> int:
 
     # Top-K agreement: compare every non-baseline against bge-large if present
     topk_results: list[TopKAgreement] = []
-    baseline_key = "bge-large" if "bge-large" in article_embs_by_key else (
-        next(iter(article_embs_by_key)) if article_embs_by_key else None
+    baseline_key = (
+        "bge-large"
+        if "bge-large" in article_embs_by_key
+        else (next(iter(article_embs_by_key)) if article_embs_by_key else None)
     )
     if baseline_key and len(article_embs_by_key) >= 2:
         for key in article_embs_by_key:

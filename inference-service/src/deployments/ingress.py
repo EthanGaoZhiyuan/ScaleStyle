@@ -199,6 +199,7 @@ class IngressDeployment:
             personalization_fallback_total,
             personalization_request_mode_total,
         )
+
         self._personalization_fallback_active = personalization_fallback_active
         self._personalization_fallback_total = personalization_fallback_total
         self._personalization_request_mode_total = personalization_request_mode_total
@@ -495,7 +496,8 @@ class IngressDeployment:
                 "flow": route.get("flow", "smart"),
                 "recall_k": recall_k,
                 "rerank_max_docs": enrich_limit,
-                "rerank_enabled": RerankerConfig.ENABLED and (route.get("flow") == "smart"),
+                "rerank_enabled": RerankerConfig.ENABLED
+                and (route.get("flow") == "smart"),
             }
             resp["contract"] = contract_dbg
             if extra_debug:
@@ -509,20 +511,30 @@ class IngressDeployment:
 
         return resp
 
-    def _record_search_metrics(self, t0: float, intent: str, flow: str, status: str = "success") -> None:
+    def _record_search_metrics(
+        self, t0: float, intent: str, flow: str, status: str = "success"
+    ) -> None:
         """Record request-level Prometheus metrics."""
         logger.debug(f"Metrics recorded: intent={intent} flow={flow} status={status}")
         metrics = self._get_metrics()
         metrics["REQUEST_TOTAL"].labels(intent=intent, flow=flow, status=status).inc()
-        metrics["REQUEST_DURATION"].labels(intent=intent, flow=flow).observe((time.time() - t0))
+        metrics["REQUEST_DURATION"].labels(intent=intent, flow=flow).observe(
+            (time.time() - t0)
+        )
 
     async def _run_browse_fallback(
-        self, req: "SearchRequest", request_id: str, trace_id: str, route_ms: Optional[float]
+        self,
+        req: "SearchRequest",
+        request_id: str,
+        trace_id: str,
+        route_ms: Optional[float],
     ) -> tuple:
         """Fetch popularity top-k for BROWSE intent; returns (results, fallback_ms)."""
         t_fallback0 = time.perf_counter()
         results = await self._safe_popularity_topk(req.k)
-        fallback_ms = self._record_phase_metric("fallback", t_fallback0, "browse_popularity")
+        fallback_ms = self._record_phase_metric(
+            "fallback", t_fallback0, "browse_popularity"
+        )
         logger.info(
             "request_id=%s trace_id=%s intent=BROWSE k=%d phase=fallback outcome=browse_popularity latency_ms=%.2f",
             request_id,
@@ -533,12 +545,18 @@ class IngressDeployment:
         return results, fallback_ms
 
     async def _run_base_flow_fallback(
-        self, req: "SearchRequest", request_id: str, trace_id: str, route_ms: Optional[float]
+        self,
+        req: "SearchRequest",
+        request_id: str,
+        trace_id: str,
+        route_ms: Optional[float],
     ) -> tuple:
         """Fetch popularity top-k for base-flow popularity mode; returns (results, fallback_ms)."""
         t_fallback0 = time.perf_counter()
         results = await self._safe_popularity_topk(req.k)
-        fallback_ms = self._record_phase_metric("fallback", t_fallback0, "base_popularity")
+        fallback_ms = self._record_phase_metric(
+            "fallback", t_fallback0, "base_popularity"
+        )
         logger.info(
             "request_id=%s trace_id=%s intent=SEARCH flow=base mode=popularity k=%d phase=fallback outcome=base_popularity latency_ms=%.2f",
             request_id,
@@ -769,9 +787,13 @@ class IngressDeployment:
                     span.set_attribute("mode", rerank_mode)
 
                     for i, r in enumerate(results):
-                        r["rerank_score"] = float(scores[i]) if i < len(scores) else -1e9
+                        r["rerank_score"] = (
+                            float(scores[i]) if i < len(scores) else -1e9
+                        )
 
-                    results.sort(key=lambda x: x.get("rerank_score", -1e9), reverse=True)
+                    results.sort(
+                        key=lambda x: x.get("rerank_score", -1e9), reverse=True
+                    )
 
                     # Load one request-scoped personalization snapshot and
                     # apply boost without any ad hoc Redis fan-out.
@@ -779,7 +801,9 @@ class IngressDeployment:
                         try:
                             t_snapshot_phase0 = time.perf_counter()
                             candidate_item_ids = [
-                                r.get("article_id") for r in results if r.get("article_id")
+                                r.get("article_id")
+                                for r in results
+                                if r.get("article_id")
                             ]
                             snapshot = await asyncio.wait_for(
                                 asyncio.to_thread(
@@ -788,14 +812,17 @@ class IngressDeployment:
                                     candidate_item_ids,
                                     max_recent_clicks=PersonalizationConfig.MAX_RECENT_CLICKS_USED,
                                 ),
-                                timeout=PersonalizationConfig.SNAPSHOT_TIMEOUT_MS / 1000.0,
+                                timeout=PersonalizationConfig.SNAPSHOT_TIMEOUT_MS
+                                / 1000.0,
                             )
                             ctx["snapshot_ms"] = self._record_phase_metric(
                                 "personalization_snapshot",
                                 t_snapshot_phase0,
                                 "degraded" if snapshot.degraded else "success",
                             )
-                            behavior_boost_info = self.behavior_boost.apply_boost(snapshot, results)
+                            behavior_boost_info = self.behavior_boost.apply_boost(
+                                snapshot, results
+                            )
                             logger.info(
                                 "request_id=%s trace_id=%s phase=personalization_snapshot outcome=%s latency_ms=%.2f redis_round_trips=%d degrade_reasons=%s",
                                 request_id,
@@ -804,20 +831,26 @@ class IngressDeployment:
                                 ctx["snapshot_ms"],
                                 snapshot.redis_round_trips,
                                 (
-                                    ",".join(reason.value for reason in snapshot.degraded_reasons)
+                                    ",".join(
+                                        reason.value
+                                        for reason in snapshot.degraded_reasons
+                                    )
                                     if snapshot.degraded_reasons
                                     else "none"
                                 ),
                             )
                             if snapshot.degraded:
                                 for degraded_reason in snapshot.degraded_reasons:
-                                    _record_request_degraded(self._get_metrics(), degraded_reason)
+                                    _record_request_degraded(
+                                        self._get_metrics(), degraded_reason
+                                    )
                             if req.debug:
                                 behavior_boost_info["snapshot"] = {
                                     "redis_round_trips": snapshot.redis_round_trips,
                                     "degraded": snapshot.degraded,
                                     "degraded_reasons": [
-                                        reason.value for reason in snapshot.degraded_reasons
+                                        reason.value
+                                        for reason in snapshot.degraded_reasons
                                     ],
                                 }
                         except asyncio.TimeoutError:
@@ -848,7 +881,9 @@ class IngressDeployment:
                                 e,
                             )
                             behavior_boost_info = {"boosted_items": 0, "degraded": True}
-                            ctx["personalization_mode"] = "degraded_runtime_boost_failure"
+                            ctx["personalization_mode"] = (
+                                "degraded_runtime_boost_failure"
+                            )
                             self._record_phase_metric(
                                 "personalization_snapshot",
                                 t_snapshot_phase0,
@@ -859,7 +894,9 @@ class IngressDeployment:
                                 DegradationReason.PERSONALIZATION_UNAVAILABLE,
                             )
                     else:
-                        logger.debug("Personalization disabled via PERSONALIZATION_ENABLED")
+                        logger.debug(
+                            "Personalization disabled via PERSONALIZATION_ENABLED"
+                        )
 
                     # Capture order after reranking (and boosting)
                     after_ids = [r.get("article_id") for r in results]
@@ -870,7 +907,9 @@ class IngressDeployment:
                         1 for i in range(top_k_compare) if before_ids[i] != after_ids[i]
                     )
                     top1_changed = (
-                        before_ids[0] != after_ids[0] if before_ids and after_ids else False
+                        before_ids[0] != after_ids[0]
+                        if before_ids and after_ids
+                        else False
                     )
 
                     rerank_effect = {
@@ -991,7 +1030,9 @@ class IngressDeployment:
 
                 # Update contract_dbg if reason was generated
                 if reason_value and ctx["contract_dbg_cache"]:
-                    missing_by_field = ctx["contract_dbg_cache"].get("missing_by_field", {})
+                    missing_by_field = ctx["contract_dbg_cache"].get(
+                        "missing_by_field", {}
+                    )
                     if missing_by_field.get("reason", 0) > 0:
                         missing_by_field["reason"] = 0
                         ctx["contract_dbg_cache"]["missing_total"] = sum(
@@ -1061,7 +1102,9 @@ class IngressDeployment:
         request_id = str(uuid.uuid4())
         trace_id = _current_trace_id()
         t0 = time.time()
-        route_ms = embed_ms = ret_ms = enrich_ms = rerank_ms = fallback_ms = generation_ms = None
+        route_ms = embed_ms = ret_ms = enrich_ms = rerank_ms = fallback_ms = (
+            generation_ms
+        ) = None
         rerank_mode = rerank_effect = None
         behavior_boost_info = {"boosted_items": 0}
 
@@ -1078,9 +1121,16 @@ class IngressDeployment:
 
         def _respond(results, latency_patch=None, extra_debug=None):
             return self._build_text_search_response(
-                req, t0, request_id, route, results,
-                ctx=ctx, recall_k=recall_k, enrich_limit=enrich_limit,
-                latency_patch=latency_patch, extra_debug=extra_debug,
+                req,
+                t0,
+                request_id,
+                route,
+                results,
+                ctx=ctx,
+                recall_k=recall_k,
+                enrich_limit=enrich_limit,
+                latency_patch=latency_patch,
+                extra_debug=extra_debug,
             )
 
         with self.tracer.start_as_current_span("search_request") as main_span:
@@ -1099,20 +1149,27 @@ class IngressDeployment:
                 main_span.set_attribute("intent", route.get("intent", "SEARCH"))
                 logger.info(
                     "request_id=%s trace_id=%s phase=route outcome=success latency_ms=%.2f",
-                    request_id, trace_id, route_ms,
+                    request_id,
+                    trace_id,
+                    route_ms,
                 )
             except Exception as e:
                 route_ms = self._record_phase_metric("route", t_route_phase0, "error")
                 logger.exception(
                     "request_id=%s trace_id=%s route_failed error=%s",
-                    request_id, trace_id, e,
+                    request_id,
+                    trace_id,
+                    e,
                 )
                 route = {"intent": "SEARCH", "filters": {}}
                 main_span.set_attribute("error", True)
                 main_span.set_attribute("error.message", str(e))
                 logger.warning(
                     "request_id=%s trace_id=%s phase=route outcome=error latency_ms=%.2f error=%s",
-                    request_id, trace_id, route_ms, e,
+                    request_id,
+                    trace_id,
+                    route_ms,
+                    e,
                 )
 
             intent = route.get("intent", "SEARCH")
@@ -1138,7 +1195,9 @@ class IngressDeployment:
                     req, request_id, trace_id, route_ms
                 )
                 self._record_search_metrics(t0, "BROWSE", flow)
-                return _respond(results, latency_patch={"route": route_ms, "fallback": fallback_ms})
+                return _respond(
+                    results, latency_patch={"route": route_ms, "fallback": fallback_ms}
+                )
 
             # --- Base flow popularity branch ---
             base_flow_mode = ABTestConfig.BASE_FLOW_MODE
@@ -1160,12 +1219,18 @@ class IngressDeployment:
             if embed_fail:
                 t_f0 = time.perf_counter()
                 results = await self._safe_popularity_topk(req.k)
-                fallback_ms = self._record_phase_metric("fallback", t_f0, embed_fail.value)
+                fallback_ms = self._record_phase_metric(
+                    "fallback", t_f0, embed_fail.value
+                )
                 _record_request_degraded(self._get_metrics(), embed_fail)
                 self._record_search_metrics(t0, intent, flow, "fallback")
                 return _respond(
                     results,
-                    latency_patch={"route": route_ms, "embed": embed_ms, "fallback": fallback_ms},
+                    latency_patch={
+                        "route": route_ms,
+                        "embed": embed_ms,
+                        "fallback": fallback_ms,
+                    },
                 )
 
             # --- Retrieve phase ---
@@ -1175,14 +1240,18 @@ class IngressDeployment:
             if ret_fail:
                 t_f0 = time.perf_counter()
                 results = await self._safe_popularity_topk(req.k)
-                fallback_ms = self._record_phase_metric("fallback", t_f0, ret_fail.value)
+                fallback_ms = self._record_phase_metric(
+                    "fallback", t_f0, ret_fail.value
+                )
                 _record_request_degraded(self._get_metrics(), ret_fail)
                 self._record_search_metrics(t0, intent, flow, "fallback")
                 return _respond(
                     results,
                     latency_patch={
-                        "route": route_ms, "embed": embed_ms,
-                        "retrieve": ret_ms, "fallback": fallback_ms,
+                        "route": route_ms,
+                        "embed": embed_ms,
+                        "retrieve": ret_ms,
+                        "fallback": fallback_ms,
                     },
                 )
 
@@ -1221,7 +1290,9 @@ class IngressDeployment:
                 main_span.set_attribute("error.message", str(e))
                 logger.exception(
                     "request_id=%s trace_id=%s enrich_filter_failed error=%s -> fallback popularity",
-                    request_id, trace_id, e,
+                    request_id,
+                    trace_id,
+                    e,
                 )
                 t_f0 = time.perf_counter()
                 results = await self._safe_popularity_topk(req.k)
@@ -1235,12 +1306,17 @@ class IngressDeployment:
                 return _respond(
                     results,
                     latency_patch={
-                        "route": route_ms, "embed": embed_ms, "retrieve": ret_ms,
-                        "enrich": enrich_ms, "rerank": rerank_ms,
+                        "route": route_ms,
+                        "embed": embed_ms,
+                        "retrieve": ret_ms,
+                        "enrich": enrich_ms,
+                        "rerank": rerank_ms,
                         "personalization_snapshot": ctx["snapshot_ms"],
                         "fallback": fallback_ms,
                     },
-                    extra_debug={"rerank": {"mode": rerank_mode}} if rerank_mode else None,
+                    extra_debug=(
+                        {"rerank": {"mode": rerank_mode}} if rerank_mode else None
+                    ),
                 )
 
             # --- Final response ---
@@ -1271,10 +1347,14 @@ class IngressDeployment:
             resp = _respond(
                 results,
                 latency_patch={
-                    "route": route_ms, "embed": embed_ms, "retrieve": ret_ms,
-                    "enrich": enrich_ms, "rerank": rerank_ms,
+                    "route": route_ms,
+                    "embed": embed_ms,
+                    "retrieve": ret_ms,
+                    "enrich": enrich_ms,
+                    "rerank": rerank_ms,
                     "personalization_snapshot": snapshot_ms,
-                    "fallback": fallback_ms, "generation": generation_ms,
+                    "fallback": fallback_ms,
+                    "generation": generation_ms,
                 },
                 extra_debug=extra_debug if extra_debug else None,
             )
@@ -1282,9 +1362,15 @@ class IngressDeployment:
             total_ms = resp.get("latency_ms", {}).get("total")
             logger.info(
                 "request_id=%s trace_id=%s intent=SEARCH k=%d route_ms=%.2f embed_ms=%.2f ret_ms=%.2f snapshot_ms=%.2f gen_ms=%.2f total_ms=%.2f filters=%s personalization_mode=%s",
-                request_id, trace_id, req.k,
-                route_ms or -1, embed_ms or -1, ret_ms or -1,
-                snapshot_ms or -1, generation_ms or -1, total_ms or -1,
+                request_id,
+                trace_id,
+                req.k,
+                route_ms or -1,
+                embed_ms or -1,
+                ret_ms or -1,
+                snapshot_ms or -1,
+                generation_ms or -1,
+                total_ms or -1,
                 json.dumps(filters, ensure_ascii=False),
                 ctx["personalization_mode"],
             )
@@ -1303,7 +1389,9 @@ class IngressDeployment:
                 main_span.set_attribute("generation_latency_ms", generation_ms)
 
             metrics = self._get_metrics()
-            metrics["REQUEST_TOTAL"].labels(intent=intent, flow=flow, status="success").inc()
+            metrics["REQUEST_TOTAL"].labels(
+                intent=intent, flow=flow, status="success"
+            ).inc()
             metrics["REQUEST_DURATION"].labels(intent=intent, flow=flow).observe(
                 (time.time() - t0)
             )
@@ -1648,8 +1736,10 @@ class IngressDeployment:
                     "imgUrl": meta.get("image_url") or "",
                     "source": "ray",
                     "degraded": degraded,
-                    "degradedReason": ",".join(degraded_reasons) if len(degraded_reasons) == 1 else (
-                        ",".join(degraded_reasons) if degraded_reasons else None
+                    "degradedReason": (
+                        ",".join(degraded_reasons)
+                        if len(degraded_reasons) == 1
+                        else (",".join(degraded_reasons) if degraded_reasons else None)
                     ),
                     "reason": meta.get("reason") or "",
                     "reasonSource": None,
@@ -1714,7 +1804,10 @@ class IngressDeployment:
         try:
             if self.vision_handle is None:
                 return JSONResponse(
-                    {"error": "Vision search not available (VISION_ENABLED=0)", "status": "unavailable"},
+                    {
+                        "error": "Vision search not available (VISION_ENABLED=0)",
+                        "status": "unavailable",
+                    },
                     status_code=503,
                 )
 
@@ -1732,7 +1825,10 @@ class IngressDeployment:
                 )
             if not image_base64:
                 return JSONResponse(
-                    {"error": "image_base64 is required for hybrid search", "status": "error"},
+                    {
+                        "error": "image_base64 is required for hybrid search",
+                        "status": "error",
+                    },
                     status_code=400,
                 )
 
@@ -1751,15 +1847,23 @@ class IngressDeployment:
                     timeout=EmbeddingConfig.TIMEOUT_MS / 1000.0,
                 )
                 return await asyncio.wait_for(
-                    self.retrieval_handle.search.remote(vector, candidate_k=recall_k, filters={}),
+                    self.retrieval_handle.search.remote(
+                        vector, candidate_k=recall_k, filters={}
+                    ),
                     timeout=RetrievalConfig.TIMEOUT_MS / 1000.0,
                 )
 
             async def recall_image() -> list[dict]:
-                vision_body = {"mode": "image", "image_base64": image_base64, "k": recall_k}
+                vision_body = {
+                    "mode": "image",
+                    "image_base64": image_base64,
+                    "k": recall_k,
+                }
                 vision_result = await self.vision_handle.remote(vision_body)
                 if vision_result.get("status") == "error":
-                    raise RuntimeError(vision_result.get("error", "image recall failed"))
+                    raise RuntimeError(
+                        vision_result.get("error", "image recall failed")
+                    )
                 return list(vision_result.get("items") or [])
 
             text_task = asyncio.create_task(recall_text())
@@ -1891,8 +1995,12 @@ class IngressDeployment:
                         "imgUrl": meta.get("image_url") or "",
                         "source": "hybrid",
                         "degraded": degraded,
-                        "degradedReason": degraded_reasons[0] if len(degraded_reasons) == 1 else (
-                            ",".join(degraded_reasons) if degraded_reasons else None
+                        "degradedReason": (
+                            degraded_reasons[0]
+                            if len(degraded_reasons) == 1
+                            else (
+                                ",".join(degraded_reasons) if degraded_reasons else None
+                            )
                         ),
                         "reason": meta.get("reason") or "",
                         "reasonSource": None,
@@ -1914,7 +2022,9 @@ class IngressDeployment:
                 "request_id": request_id,
                 "latency_ms": total_ms,
                 "degraded": degraded,
-                "degraded_reason": ",".join(degraded_reasons) if degraded_reasons else None,
+                "degraded_reason": (
+                    ",".join(degraded_reasons) if degraded_reasons else None
+                ),
                 "contract_debug": contract_debug,
             }
 

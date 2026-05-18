@@ -123,7 +123,9 @@ def validate_parquet(
     sample_size = min(100, len(df))
     dims = df[vector_field].iloc[:sample_size].apply(len).unique()
     if len(dims) > 1:
-        raise ValueError(f"Inconsistent embedding dimensions in first {sample_size} rows: {sorted(dims.tolist())}")
+        raise ValueError(
+            f"Inconsistent embedding dimensions in first {sample_size} rows: {sorted(dims.tolist())}"
+        )
 
     print(f"Parquet valid: {len(df):,} rows, {actual_dim}-dim '{vector_field}'")
     return df
@@ -163,7 +165,6 @@ def create_image_collection(
     smoke-test artifacts.
     """
     mc = _milvus_client()
-    uri = f"http://{MILVUS_HOST}:{MILVUS_PORT}"
 
     if mc.has_collection(collection_name):
         if not drop_existing:
@@ -179,7 +180,9 @@ def create_image_collection(
     connections.connect(alias="default", host=MILVUS_HOST, port=MILVUS_PORT)
 
     fields = [
-        FieldSchema(name="article_id", dtype=DataType.INT64, is_primary=True, auto_id=False),
+        FieldSchema(
+            name="article_id", dtype=DataType.INT64, is_primary=True, auto_id=False
+        ),
         FieldSchema(name="article_id_str", dtype=DataType.VARCHAR, max_length=32),
         FieldSchema(name="image_path", dtype=DataType.VARCHAR, max_length=512),
         FieldSchema(name=vector_field, dtype=DataType.FLOAT_VECTOR, dim=dim),
@@ -222,10 +225,12 @@ def insert_records(
     for start in range(0, total, batch_size):
         batch = df.iloc[start : start + batch_size]
         data = [
-            {"article_id": int(row["article_id"]),
-             "article_id_str": str(row["article_id_str"]),
-             "image_path": str(row["image_path"]),
-             vector_field: row[vector_field]}
+            {
+                "article_id": int(row["article_id"]),
+                "article_id_str": str(row["article_id_str"]),
+                "image_path": str(row["image_path"]),
+                vector_field: row[vector_field],
+            }
             for _, row in batch.iterrows()
         ]
         collection.insert(data)
@@ -271,7 +276,9 @@ def verify_and_search(
             aid = hit.entity.get("article_id")
             aid_str = hit.entity.get("article_id_str")
             img = hit.entity.get("image_path", "")
-            print(f"    {i+1}. article_id={aid} ({aid_str})  score={hit.score:.6f}  path={img}")
+            print(
+                f"    {i+1}. article_id={aid} ({aid_str})  score={hit.score:.6f}  path={img}"
+            )
 
 
 # ──────────────────────────── CLI ────────────────────────────

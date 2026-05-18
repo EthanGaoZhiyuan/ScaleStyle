@@ -71,7 +71,9 @@ class RedisConfig:
     # round-trip), ElastiCache (~0.5-3ms), and moderate-load spikes without hanging.
     # The application-level personalization budget (PERSONALIZATION_TIMEOUT_MS=50ms)
     # remains the outer guard; this is the socket-level last-resort cut-off.
-    SOCKET_CONNECT_TIMEOUT_SEC = float(os.getenv("REDIS_CONNECT_TIMEOUT_MS", "150")) / 1000.0
+    SOCKET_CONNECT_TIMEOUT_SEC = (
+        float(os.getenv("REDIS_CONNECT_TIMEOUT_MS", "150")) / 1000.0
+    )
     SOCKET_TIMEOUT_SEC = float(os.getenv("REDIS_SOCKET_TIMEOUT_MS", "150")) / 1000.0
 
 

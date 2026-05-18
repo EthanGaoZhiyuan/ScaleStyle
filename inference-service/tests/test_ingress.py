@@ -38,7 +38,9 @@ async def test_empty_candidates_fallback_popularity(monkeypatch):
 
             return P()
 
-    monkeypatch.setattr("src.utils.redis_client.RedisClient.get_client", lambda: DummyRedis())
+    monkeypatch.setattr(
+        "src.utils.redis_client.RedisClient.get_client", lambda: DummyRedis()
+    )
 
     from src.deployments.ingress import IngressDeployment, SearchRequest
 
@@ -101,7 +103,9 @@ async def test_redis_timeout_graceful_degradation(monkeypatch):
         def pipeline(self):
             raise TimeoutError("Redis connection timeout")
 
-    monkeypatch.setattr("src.utils.redis_client.RedisClient.get_client", lambda: BadRedis())
+    monkeypatch.setattr(
+        "src.utils.redis_client.RedisClient.get_client", lambda: BadRedis()
+    )
 
     from src.deployments.ingress import IngressDeployment, SearchRequest
 
@@ -136,7 +140,9 @@ async def test_redis_timeout_graceful_degradation(monkeypatch):
     ing = IngressDeployment(router, embed, retrieval, popularity, reranker, generation)
 
     # Even with Redis timeout, request should not crash
-    resp = await ing._search_impl(SearchRequest(query="test", k=1, debug=True, user_id="u2"))
+    resp = await ing._search_impl(
+        SearchRequest(query="test", k=1, debug=True, user_id="u2")
+    )
 
     # Should have results (degraded to no meta enrichment or fallback)
     assert "results" in resp
@@ -173,7 +179,9 @@ async def test_ab_flow_base_no_rerank(monkeypatch):
 
             return P()
 
-    monkeypatch.setattr("src.utils.redis_client.RedisClient.get_client", lambda: DummyRedis())
+    monkeypatch.setattr(
+        "src.utils.redis_client.RedisClient.get_client", lambda: DummyRedis()
+    )
 
     from src.deployments.ingress import IngressDeployment, SearchRequest
 
@@ -207,7 +215,9 @@ async def test_ab_flow_base_no_rerank(monkeypatch):
     )
 
     ing = IngressDeployment(router, embed, retrieval, popularity, reranker, generation)
-    resp = await ing._search_impl(SearchRequest(query="test", k=1, debug=True, user_id="u1"))
+    resp = await ing._search_impl(
+        SearchRequest(query="test", k=1, debug=True, user_id="u1")
+    )
 
     # Base flow should NOT call reranker
     assert calls["rerank"] == 0
@@ -243,7 +253,9 @@ async def test_ab_flow_smart_calls_rerank(monkeypatch):
 
             return P()
 
-    monkeypatch.setattr("src.utils.redis_client.RedisClient.get_client", lambda: DummyRedis())
+    monkeypatch.setattr(
+        "src.utils.redis_client.RedisClient.get_client", lambda: DummyRedis()
+    )
 
     from src.deployments.ingress import IngressDeployment, SearchRequest
 
@@ -278,7 +290,9 @@ async def test_ab_flow_smart_calls_rerank(monkeypatch):
     )
 
     ing = IngressDeployment(router, embed, retrieval, popularity, reranker, generation)
-    resp = await ing._search_impl(SearchRequest(query="test", k=1, debug=True, user_id="u2"))
+    resp = await ing._search_impl(
+        SearchRequest(query="test", k=1, debug=True, user_id="u2")
+    )
 
     # Smart flow should call reranker
     assert calls["rerank"] == 1

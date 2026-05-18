@@ -273,7 +273,11 @@ class PopularityDeployment:
                         len(ids_with_scores),
                     )
             except Exception as e:
-                logger.warning("popularity_cold_start_fallback failed key=%s err=%s", _POPULARITY_KEY, e)
+                logger.warning(
+                    "popularity_cold_start_fallback failed key=%s err=%s",
+                    _POPULARITY_KEY,
+                    e,
+                )
 
         ids = [canonical_article_id(item_id) for item_id, _ in ids_with_scores]
 

@@ -3,7 +3,7 @@
 import os
 import sys
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock, call
+from unittest.mock import Mock
 
 import pytest
 
@@ -106,9 +106,9 @@ class TestRedisFeatureWriterExecute:
         )
 
         args = lua_script.call_args.kwargs["args"]
-        assert args[1] == "user-abc"   # ARGV[2]
-        assert args[2] == "item-xyz"   # ARGV[3]
-        assert args[5] == "shoes"      # ARGV[6] category
+        assert args[1] == "user-abc"  # ARGV[2]
+        assert args[2] == "item-xyz"  # ARGV[3]
+        assert args[5] == "shoes"  # ARGV[6] category
 
     def test_execute_passes_category_unknown(self, writer):
         w, lua_script = writer
@@ -143,6 +143,7 @@ class TestRedisFeatureWriterExecute:
 
         args = lua_script.call_args.kwargs["args"]
         import config
+
         assert args[20] == config.POPULARITY_BUCKET_PREFIX
 
     # ── Duplicate detection ───────────────────────────────────────────────────

@@ -37,7 +37,9 @@ class RetrievalDeployment:
         """
         # Initialize ready state to False until Milvus is fully loaded
         self.ready = False
-        self.collection_name = os.getenv("MILVUS_COLLECTION", "scale_style_bge_small_v1_5")
+        self.collection_name = os.getenv(
+            "MILVUS_COLLECTION", "scale_style_bge_small_v1_5"
+        )
 
         logger.info(
             f"Initializing RetrievalDeployment for collection: {self.collection_name}"
@@ -81,9 +83,7 @@ class RetrievalDeployment:
                     f"Rows: {row_count}"
                 )
             except Exception as e:
-                logger.error(
-                    f"Failed to load collection '{self.collection_name}': {e}"
-                )
+                logger.error(f"Failed to load collection '{self.collection_name}': {e}")
                 self.ready = False
 
         except Exception as e:

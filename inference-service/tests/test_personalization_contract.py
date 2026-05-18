@@ -13,7 +13,6 @@ This test FAILS if:
     all candidates (popularity_signals stays all-zero)
 """
 
-import os
 import sys
 import math
 import time
@@ -28,15 +27,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 try:
     import fakeredis
+
     HAS_FAKEREDIS = True
 except ImportError:
     HAS_FAKEREDIS = False
 
 pytestmark = pytest.mark.skipif(not HAS_FAKEREDIS, reason="fakeredis not installed")
 
-from src.personalization.feature_reader import FeatureReader
-from src.utils.redis_metadata import canonical_article_id
-
+from src.personalization.feature_reader import FeatureReader  # noqa: E402
+from src.utils.redis_metadata import canonical_article_id  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -84,9 +83,9 @@ class TestRecentClicksAndAffinityContract:
                 max_recent_clicks=20,
             )
 
-        assert canonical_id in snapshot.recent_clicks, (
-            f"Expected {canonical_id!r} in recent_clicks, got {snapshot.recent_clicks}"
-        )
+        assert (
+            canonical_id in snapshot.recent_clicks
+        ), f"Expected {canonical_id!r} in recent_clicks, got {snapshot.recent_clicks}"
 
     def test_category_affinity_is_visible_in_snapshot(self):
         """
@@ -111,12 +110,12 @@ class TestRecentClicksAndAffinityContract:
                 max_recent_clicks=20,
             )
 
-        assert "dress" in snapshot.category_affinity, (
-            "Expected 'dress' in category_affinity"
-        )
-        assert snapshot.category_affinity["dress"] > 0, (
-            "Expected positive affinity score for 'dress'"
-        )
+        assert (
+            "dress" in snapshot.category_affinity
+        ), "Expected 'dress' in category_affinity"
+        assert (
+            snapshot.category_affinity["dress"] > 0
+        ), "Expected positive affinity score for 'dress'"
 
     def test_non_canonical_id_in_list_is_canonicalized_on_read(self):
         """
@@ -140,9 +139,9 @@ class TestRecentClicksAndAffinityContract:
                 max_recent_clicks=20,
             )
 
-        assert "0108775015" in snapshot.recent_clicks, (
-            "Reader should canonicalize raw '108775015' → '0108775015' on LRANGE"
-        )
+        assert (
+            "0108775015" in snapshot.recent_clicks
+        ), "Reader should canonicalize raw '108775015' → '0108775015' on LRANGE"
 
 
 # ---------------------------------------------------------------------------
@@ -170,12 +169,12 @@ class TestPopularityZmscoreContract:
         r.zadd(materialized_key, {canonical_id: 3.0})
 
         scores = r.zmscore(materialized_key, [canonical_id])
-        assert scores[0] is not None, (
-            f"ZMSCORE with canonical ID should return a score; got {scores}"
-        )
-        assert math.isclose(float(scores[0]), 3.0, rel_tol=1e-6), (
-            f"ZMSCORE score should be 3.0; got {scores[0]}"
-        )
+        assert (
+            scores[0] is not None
+        ), f"ZMSCORE with canonical ID should return a score; got {scores}"
+        assert math.isclose(
+            float(scores[0]), 3.0, rel_tol=1e-6
+        ), f"ZMSCORE score should be 3.0; got {scores[0]}"
 
     def test_non_canonical_zset_member_is_not_found_by_canonical_query(self):
         """
@@ -207,7 +206,11 @@ class TestPopularityZmscoreContract:
         r.expire(materialized_key, 300)
 
         reader = _make_reader(r)
-        resolved_keys = {"1h": materialized_key, "24h": materialized_key, "7d": materialized_key}
+        resolved_keys = {
+            "1h": materialized_key,
+            "24h": materialized_key,
+            "7d": materialized_key,
+        }
         with patch.object(
             reader,
             "_resolve_materialized_popularity_windows",

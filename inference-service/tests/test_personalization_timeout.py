@@ -13,13 +13,11 @@ Exception handler) so operators can distinguish Redis latency spikes from
 other personalization failures in logs and metrics.
 """
 
-import asyncio
 import time
 
 import pytest
 
 from tests.utils import FakeHandle
-
 
 # ---------------------------------------------------------------------------
 # Shared test infrastructure
@@ -64,7 +62,9 @@ class SlowFeatureReader:
     the event loop.  The thread continues briefly then is abandoned.
     """
 
-    def load_personalization_snapshot(self, user_id, candidate_ids, max_recent_clicks=20):
+    def load_personalization_snapshot(
+        self, user_id, candidate_ids, max_recent_clicks=20
+    ):
         time.sleep(1.0)  # 1 s — always exceeds any ≤50ms timeout
         raise AssertionError("Should never reach here — wait_for fires first")
 
@@ -72,7 +72,9 @@ class SlowFeatureReader:
 class InstantFeatureReader:
     """Simulates a fast Redis call that completes well within the timeout."""
 
-    def load_personalization_snapshot(self, user_id, candidate_ids, max_recent_clicks=20):
+    def load_personalization_snapshot(
+        self, user_id, candidate_ids, max_recent_clicks=20
+    ):
         from src.personalization.snapshot import PersonalizationSnapshot
 
         return PersonalizationSnapshot(
@@ -97,7 +99,11 @@ def _make_ingress(monkeypatch, vision_handle=None):
     from src.deployments.ingress import IngressDeployment
 
     router = FakeHandle(
-        route=lambda q, user_id=None: {"intent": "SEARCH", "filters": {}, "flow": "smart"}
+        route=lambda q, user_id=None: {
+            "intent": "SEARCH",
+            "filters": {},
+            "flow": "smart",
+        }
     )
     embed = FakeHandle(embed=lambda q, is_query=True: [0.1, 0.2, 0.3])
     retrieval = FakeHandle(
@@ -114,9 +120,7 @@ def _make_ingress(monkeypatch, vision_handle=None):
             "mode": "stub",
         }
     )
-    generation = FakeHandle(
-        explain=lambda q, item: {"reason": "", "mode": "fallback"}
-    )
+    generation = FakeHandle(explain=lambda q, item: {"reason": "", "mode": "fallback"})
     return IngressDeployment(
         router, embed, retrieval, popularity, reranker, generation, vision_handle
     )
@@ -143,16 +147,21 @@ async def test_personalization_timeout_text_search_still_returns_results(monkeyp
     resp = await ing._search_impl(SearchRequest(query="black dress", k=2, user_id="u1"))
 
     assert "results" in resp, "Response must contain 'results' even on timeout"
-    assert len(resp["results"]) > 0, "Must return at least one result on personalization timeout"
+    assert (
+        len(resp["results"]) > 0
+    ), "Must return at least one result on personalization timeout"
 
 
 @pytest.mark.asyncio
-async def test_personalization_timeout_logs_dedicated_timeout_message(monkeypatch, caplog):
+async def test_personalization_timeout_logs_dedicated_timeout_message(
+    monkeypatch, caplog
+):
     """
     asyncio.TimeoutError must trigger the dedicated timeout handler which logs
     'personalization_snapshot_timeout', NOT 'behavior_boost_failed'.
     """
     import logging
+
     monkeypatch.setattr("src.config.PersonalizationConfig.SNAPSHOT_TIMEOUT_MS", 1)
 
     from src.deployments.ingress import SearchRequest
@@ -163,22 +172,29 @@ async def test_personalization_timeout_logs_dedicated_timeout_message(monkeypatc
     with caplog.at_level(logging.WARNING):
         await ing._search_impl(SearchRequest(query="black dress", k=2, user_id="u1"))
 
-    timeout_msgs = [r for r in caplog.records if "personalization_snapshot_timeout" in r.message]
-    boost_fail_msgs = [r for r in caplog.records if "behavior_boost_failed" in r.message]
+    timeout_msgs = [
+        r for r in caplog.records if "personalization_snapshot_timeout" in r.message
+    ]
+    boost_fail_msgs = [
+        r for r in caplog.records if "behavior_boost_failed" in r.message
+    ]
 
     assert len(timeout_msgs) == 1, (
         f"Expected exactly 1 'personalization_snapshot_timeout' log; got {len(timeout_msgs)}.\n"
         f"All warning messages: {[r.message for r in caplog.records if r.levelno >= logging.WARNING]}"
     )
-    assert len(boost_fail_msgs) == 0, (
-        "asyncio.TimeoutError must NOT fall through to 'behavior_boost_failed' handler"
-    )
+    assert (
+        len(boost_fail_msgs) == 0
+    ), "asyncio.TimeoutError must NOT fall through to 'behavior_boost_failed' handler"
 
 
 @pytest.mark.asyncio
-async def test_personalization_timeout_message_includes_user_and_timeout(monkeypatch, caplog):
+async def test_personalization_timeout_message_includes_user_and_timeout(
+    monkeypatch, caplog
+):
     """The timeout warning must include user_id and the configured timeout_ms for debugging."""
     import logging
+
     monkeypatch.setattr("src.config.PersonalizationConfig.SNAPSHOT_TIMEOUT_MS", 1)
 
     from src.deployments.ingress import SearchRequest
@@ -187,10 +203,16 @@ async def test_personalization_timeout_message_includes_user_and_timeout(monkeyp
     ing._feature_reader = SlowFeatureReader()
 
     with caplog.at_level(logging.WARNING):
-        await ing._search_impl(SearchRequest(query="black dress", k=2, user_id="test-u"))
+        await ing._search_impl(
+            SearchRequest(query="black dress", k=2, user_id="test-u")
+        )
 
     timeout_msg = next(
-        (r.message for r in caplog.records if "personalization_snapshot_timeout" in r.message),
+        (
+            r.message
+            for r in caplog.records
+            if "personalization_snapshot_timeout" in r.message
+        ),
         None,
     )
     assert timeout_msg is not None
@@ -199,12 +221,15 @@ async def test_personalization_timeout_message_includes_user_and_timeout(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_personalization_generic_failure_logs_boost_failed_not_timeout(monkeypatch, caplog):
+async def test_personalization_generic_failure_logs_boost_failed_not_timeout(
+    monkeypatch, caplog
+):
     """
     A RuntimeError from the feature reader must log 'behavior_boost_failed',
     NOT 'personalization_snapshot_timeout'.  The two handlers must be distinct.
     """
     import logging
+
     monkeypatch.setattr("src.config.PersonalizationConfig.SNAPSHOT_TIMEOUT_MS", 5000)
 
     from src.deployments.ingress import SearchRequest
@@ -213,17 +238,25 @@ async def test_personalization_generic_failure_logs_boost_failed_not_timeout(mon
     ing._feature_reader = BrokenFeatureReader()
 
     with caplog.at_level(logging.WARNING):
-        resp = await ing._search_impl(SearchRequest(query="black dress", k=2, user_id="u1"))
+        resp = await ing._search_impl(
+            SearchRequest(query="black dress", k=2, user_id="u1")
+        )
 
     # Results still returned
     assert "results" in resp
     assert len(resp["results"]) > 0
 
-    timeout_msgs = [r for r in caplog.records if "personalization_snapshot_timeout" in r.message]
-    boost_fail_msgs = [r for r in caplog.records if "behavior_boost_failed" in r.message]
+    timeout_msgs = [
+        r for r in caplog.records if "personalization_snapshot_timeout" in r.message
+    ]
+    boost_fail_msgs = [
+        r for r in caplog.records if "behavior_boost_failed" in r.message
+    ]
 
     assert len(timeout_msgs) == 0, "RuntimeError must not trigger timeout handler"
-    assert len(boost_fail_msgs) == 1, "RuntimeError must trigger generic boost_failed handler"
+    assert (
+        len(boost_fail_msgs) == 1
+    ), "RuntimeError must trigger generic boost_failed handler"
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +271,7 @@ async def test_personalization_success_path_unaffected(monkeypatch, caplog):
     completes without timeout logs and results are returned.
     """
     import logging
+
     monkeypatch.setattr("src.config.PersonalizationConfig.SNAPSHOT_TIMEOUT_MS", 5000)
 
     from src.deployments.ingress import SearchRequest
@@ -246,16 +280,24 @@ async def test_personalization_success_path_unaffected(monkeypatch, caplog):
     ing._feature_reader = InstantFeatureReader()
 
     with caplog.at_level(logging.WARNING):
-        resp = await ing._search_impl(SearchRequest(query="black dress", k=2, user_id="u1"))
+        resp = await ing._search_impl(
+            SearchRequest(query="black dress", k=2, user_id="u1")
+        )
 
     assert "results" in resp
     assert len(resp["results"]) > 0
 
-    timeout_msgs = [r for r in caplog.records if "personalization_snapshot_timeout" in r.message]
-    boost_fail_msgs = [r for r in caplog.records if "behavior_boost_failed" in r.message]
+    timeout_msgs = [
+        r for r in caplog.records if "personalization_snapshot_timeout" in r.message
+    ]
+    boost_fail_msgs = [
+        r for r in caplog.records if "behavior_boost_failed" in r.message
+    ]
 
     assert len(timeout_msgs) == 0, "Fast reader must produce no timeout warnings"
-    assert len(boost_fail_msgs) == 0, "Fast reader must produce no boost_failed warnings"
+    assert (
+        len(boost_fail_msgs) == 0
+    ), "Fast reader must produce no boost_failed warnings"
 
 
 @pytest.mark.asyncio
@@ -265,6 +307,7 @@ async def test_personalization_disabled_no_snapshot_load(monkeypatch, caplog):
     no timeout log appears even if the reader is slow.
     """
     import logging
+
     monkeypatch.setattr("src.config.PersonalizationConfig.ENABLED", False)
     monkeypatch.setattr("src.config.PersonalizationConfig.SNAPSHOT_TIMEOUT_MS", 1)
 
@@ -274,10 +317,14 @@ async def test_personalization_disabled_no_snapshot_load(monkeypatch, caplog):
     ing._feature_reader = SlowFeatureReader()
 
     with caplog.at_level(logging.WARNING):
-        resp = await ing._search_impl(SearchRequest(query="black dress", k=2, user_id="u1"))
+        resp = await ing._search_impl(
+            SearchRequest(query="black dress", k=2, user_id="u1")
+        )
 
     assert "results" in resp
     assert len(resp["results"]) > 0
 
-    timeout_msgs = [r for r in caplog.records if "personalization_snapshot_timeout" in r.message]
+    timeout_msgs = [
+        r for r in caplog.records if "personalization_snapshot_timeout" in r.message
+    ]
     assert len(timeout_msgs) == 0, "No snapshot load when PERSONALIZATION_ENABLED=False"

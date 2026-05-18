@@ -196,7 +196,9 @@ def main() -> None:
     args = parser.parse_args()
 
     print(f"\nValidating: {args.input}")
-    print(f"Expected dim: {args.expected_dim}  |  Embedding col: {args.embedding_column}\n")
+    print(
+        f"Expected dim: {args.expected_dim}  |  Embedding col: {args.embedding_column}\n"
+    )
 
     ok = validate(args.input, args.expected_dim, args.embedding_column)
     sys.exit(0 if ok else 1)

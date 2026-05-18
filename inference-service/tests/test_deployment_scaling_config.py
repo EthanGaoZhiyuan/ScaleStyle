@@ -18,10 +18,10 @@ import sys
 import types
 from unittest.mock import MagicMock
 
-
 # ---------------------------------------------------------------------------
 # Shared stubs — installed once, used by all imports below
 # ---------------------------------------------------------------------------
+
 
 def _stub(name, **attrs):
     m = types.ModuleType(name)
@@ -46,8 +46,13 @@ _torch = _stub("torch", cuda=MagicMock(), float16="f16", float32="f32")
 _torch.cuda.is_available = lambda: False
 _stub("torch.nn", functional=MagicMock())
 _stub("torch.nn.functional", normalize=lambda *a, **kw: None)
-_stub("transformers", AutoModel=object, AutoTokenizer=object,
-      CLIPModel=MagicMock(), CLIPProcessor=MagicMock())
+_stub(
+    "transformers",
+    AutoModel=object,
+    AutoTokenizer=object,
+    CLIPModel=MagicMock(),
+    CLIPProcessor=MagicMock(),
+)
 
 # pymilvus
 _stub("pymilvus", MilvusClient=MagicMock())
@@ -72,27 +77,46 @@ _otel = _stub("opentelemetry")
 _otrace = _stub("opentelemetry.trace")
 _otrace.get_current_span = lambda: MagicMock()
 _stub("opentelemetry.context", attach=lambda *a: None, detach=lambda *a: None)
-_stub("opentelemetry.trace.propagation.tracecontext",
-      TraceContextTextMapPropagator=type("T", (), {"extract": staticmethod(lambda **kw: None)}))
+_stub(
+    "opentelemetry.trace.propagation.tracecontext",
+    TraceContextTextMapPropagator=type(
+        "T", (), {"extract": staticmethod(lambda **kw: None)}
+    ),
+)
 
 # src utilities needed by ingress / retrieval
 _stub("src.utils.observability", setup_tracing=lambda *a, **kw: MagicMock())
-_stub("src.utils.metrics",
-      counter=lambda *a, **kw: MagicMock(),
-      histogram=lambda *a, **kw: MagicMock(),
-      generate_latest_metrics=lambda: b"",
-      metrics_content_type=lambda: "text/plain")
+_stub(
+    "src.utils.metrics",
+    counter=lambda *a, **kw: MagicMock(),
+    histogram=lambda *a, **kw: MagicMock(),
+    generate_latest_metrics=lambda: b"",
+    metrics_content_type=lambda: "text/plain",
+)
 _stub("src.utils.milvus_client", create_milvus_client=lambda *a, **kw: MagicMock())
-_stub("src.utils.redis_client",
-      RedisClient=type("RC", (), {"get_client": staticmethod(lambda: MagicMock())}),
-      validate_startup_connection=lambda: None)
-_stub("src.personalization",
-      FeatureReader=object, BehaviorBoost=object, NullFeatureReader=object)
-_stub("src.personalization.metrics",
-      personalization_fallback_total=MagicMock(),
-      personalization_fallback_active=MagicMock(),
-      personalization_request_mode_total=MagicMock())
-_stub("src.deployments.multimodal", merge_ranked_candidates=lambda *a, **kw: [])
+_stub(
+    "src.utils.redis_client",
+    RedisClient=type("RC", (), {"get_client": staticmethod(lambda: MagicMock())}),
+    validate_startup_connection=lambda: None,
+)
+_stub(
+    "src.personalization",
+    FeatureReader=object,
+    BehaviorBoost=object,
+    NullFeatureReader=object,
+)
+_stub(
+    "src.personalization.metrics",
+    personalization_fallback_total=MagicMock(),
+    personalization_fallback_active=MagicMock(),
+    personalization_request_mode_total=MagicMock(),
+)
+_stub(
+    "src.deployments.multimodal",
+    merge_ranked_candidates=lambda *a, **kw: [],
+    fuse_with_normalized_scores=lambda *a, **kw: [],
+    apply_behavior_boost_to_hybrid_results=lambda *a, **kw: None,
+)
 
 # Stub sub-deployments ingress imports — but NOT embedding/retrieval/reranker/vision,
 # since TestDeploymentOptions imports the real modules to verify their options dicts.
@@ -109,6 +133,7 @@ for _dname, _sym in {
 # ---------------------------------------------------------------------------
 # Tests: env-var default expressions
 # ---------------------------------------------------------------------------
+
 
 class TestDefaultValues:
     """
@@ -153,6 +178,7 @@ class TestDefaultValues:
 # Tests: deployment _serve_deployment_options (requires actual import)
 # ---------------------------------------------------------------------------
 
+
 class TestDeploymentOptions:
     """
     Confirm that each deployment's _serve_deployment_options dict contains
@@ -170,6 +196,7 @@ class TestDeploymentOptions:
                 EmbeddingDeployment,
                 EMBEDDING_MAX_ONGOING_REQUESTS,
             )
+
             opts = EmbeddingDeployment._serve_deployment_options
             assert "max_ongoing_requests" in opts
             assert opts["max_ongoing_requests"] == EMBEDDING_MAX_ONGOING_REQUESTS
@@ -181,6 +208,7 @@ class TestDeploymentOptions:
         saved = os.environ.pop("RETRIEVAL_MAX_ONGOING_REQUESTS", None)
         try:
             from src.deployments.retrieval import RetrievalDeployment
+
             opts = RetrievalDeployment._serve_deployment_options
             assert "max_ongoing_requests" in opts
             assert opts["max_ongoing_requests"] == int(
@@ -194,6 +222,7 @@ class TestDeploymentOptions:
         saved = os.environ.pop("RERANKER_MAX_ONGOING_REQUESTS", None)
         try:
             from src.deployments.reranker import RerankerDeployment
+
             opts = RerankerDeployment._serve_deployment_options
             assert "max_ongoing_requests" in opts
             assert opts["max_ongoing_requests"] == int(
@@ -207,6 +236,7 @@ class TestDeploymentOptions:
         saved = os.environ.pop("VISION_MAX_ONGOING_REQUESTS", None)
         try:
             from src.deployments.vision import VisionDeployment
+
             opts = VisionDeployment._serve_deployment_options
             assert "max_ongoing_requests" in opts
             # Vision default is 4; docker-compose sets 8 at runtime
@@ -222,6 +252,7 @@ class TestDeploymentOptions:
 # Tests: independent tunability
 # ---------------------------------------------------------------------------
 
+
 class TestIndependentTunability:
     """
     Confirm that vision and embedding env vars are independent — setting one
@@ -233,7 +264,9 @@ class TestIndependentTunability:
         try:
             embedding_val = int(os.getenv("EMBEDDING_MAX_ONGOING_REQUESTS", "4"))
             vision_val = int(os.getenv("VISION_MAX_ONGOING_REQUESTS", "4"))
-            assert embedding_val == 4, "Embedding should not be affected by vision env var"
+            assert (
+                embedding_val == 4
+            ), "Embedding should not be affected by vision env var"
             assert vision_val == 12
         finally:
             del os.environ["VISION_MAX_ONGOING_REQUESTS"]

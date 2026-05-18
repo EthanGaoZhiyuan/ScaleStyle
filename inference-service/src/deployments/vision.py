@@ -169,10 +169,10 @@ class VisionDeployment:
         # In-process image embedding cache (LRU + TTL, thread-safe)
         _cache_size = int(os.getenv("VISION_EMBEDDING_CACHE_SIZE", "256"))
         _cache_ttl = float(os.getenv("VISION_EMBEDDING_CACHE_TTL_SECONDS", "600"))
-        self._image_cache = _ImageEmbeddingCache(max_size=_cache_size, ttl_seconds=_cache_ttl)
-        logger.info(
-            f"Image embedding cache: max_size={_cache_size}, ttl={_cache_ttl}s"
+        self._image_cache = _ImageEmbeddingCache(
+            max_size=_cache_size, ttl_seconds=_cache_ttl
         )
+        logger.info(f"Image embedding cache: max_size={_cache_size}, ttl={_cache_ttl}s")
 
         # Connect to Milvus using MilvusClient (same pattern as RetrievalDeployment)
         milvus_uri = f"http://{milvus_host}:{milvus_port}"

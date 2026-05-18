@@ -6,7 +6,6 @@ no GPU, no network access required.
 """
 
 import json
-import tempfile
 from pathlib import Path
 
 import pandas as pd
@@ -22,7 +21,6 @@ from src.generate_embeddings import (
     write_sidecar_metadata,
 )
 from src.validate_embeddings import validate
-
 
 # ──────────────────────────── build_product_text ────────────────────────────
 
@@ -133,13 +131,15 @@ class TestBuildOutputDf:
             assert "embedding" not in out.columns
 
     def test_optional_metadata_columns_forwarded(self):
-        df = pd.DataFrame({
-            "article_id": [1],
-            "price": [9.99],
-            "prod_name": ["Tee"],
-            "colour_group_name": ["Black"],
-            "detail_desc": ["A fine shirt"],
-        })
+        df = pd.DataFrame(
+            {
+                "article_id": [1],
+                "price": [9.99],
+                "prod_name": ["Tee"],
+                "colour_group_name": ["Black"],
+                "detail_desc": ["A fine shirt"],
+            }
+        )
         out = build_output_df(df, [[0.1] * 384])
         assert "price" in out.columns
         assert "prod_name" in out.columns
@@ -218,10 +218,12 @@ class TestWriteSidecarMetadata:
 class TestLoadArticles:
     def test_loads_from_csv(self, tmp_path):
         csv_path = tmp_path / "articles.csv"
-        pd.DataFrame({
-            "article_id": [1, 2, 3],
-            "prod_name": ["A", "B", "C"],
-        }).to_csv(str(csv_path), index=False)
+        pd.DataFrame(
+            {
+                "article_id": [1, 2, 3],
+                "prod_name": ["A", "B", "C"],
+            }
+        ).to_csv(str(csv_path), index=False)
 
         df = load_articles(str(csv_path))
         assert len(df) == 3
@@ -229,20 +231,24 @@ class TestLoadArticles:
 
     def test_loads_from_parquet(self, tmp_path):
         pq_path = tmp_path / "articles.parquet"
-        pd.DataFrame({
-            "article_id": [10, 20],
-            "prod_name": ["X", "Y"],
-        }).to_parquet(str(pq_path))
+        pd.DataFrame(
+            {
+                "article_id": [10, 20],
+                "prod_name": ["X", "Y"],
+            }
+        ).to_parquet(str(pq_path))
 
         df = load_articles(str(pq_path))
         assert len(df) == 2
 
     def test_deduplicates_article_id_keeps_first(self, tmp_path):
         csv_path = tmp_path / "articles.csv"
-        pd.DataFrame({
-            "article_id": [1, 1, 2],
-            "prod_name": ["First", "Duplicate", "Other"],
-        }).to_csv(str(csv_path), index=False)
+        pd.DataFrame(
+            {
+                "article_id": [1, 1, 2],
+                "prod_name": ["First", "Duplicate", "Other"],
+            }
+        ).to_csv(str(csv_path), index=False)
 
         df = load_articles(str(csv_path))
         assert len(df) == 2
@@ -267,10 +273,12 @@ class TestValidateEmbeddings:
     def _make_parquet(self, tmp_path, dim: int = 384, n: int = 10) -> Path:
         """Write a minimal valid embedding parquet to tmp_path."""
         p = tmp_path / "embeddings.parquet"
-        pd.DataFrame({
-            "article_id": range(n),
-            "bge_embedding": [[0.1] * dim] * n,
-        }).to_parquet(str(p))
+        pd.DataFrame(
+            {
+                "article_id": range(n),
+                "bge_embedding": [[0.1] * dim] * n,
+            }
+        ).to_parquet(str(p))
         return p
 
     def test_passes_for_valid_parquet(self, tmp_path):
@@ -296,10 +304,12 @@ class TestValidateEmbeddings:
 
     def test_warns_on_duplicate_article_id(self, tmp_path, capsys):
         p = tmp_path / "dups.parquet"
-        pd.DataFrame({
-            "article_id": [1, 1, 2],
-            "bge_embedding": [[0.1] * 384] * 3,
-        }).to_parquet(str(p))
+        pd.DataFrame(
+            {
+                "article_id": [1, 1, 2],
+                "bge_embedding": [[0.1] * 384] * 3,
+            }
+        ).to_parquet(str(p))
         # Should still pass (duplicates are a warning, not an error)
         result = validate(str(p), expected_dim=384)
         captured = capsys.readouterr()
@@ -310,11 +320,13 @@ class TestValidateEmbeddings:
         p = self._make_parquet(tmp_path, dim=384)
         sidecar = p.with_suffix(".meta.json")
         sidecar.write_text(
-            json.dumps({
-                "model_name": "BAAI/bge-small-en-v1.5",
-                "embedding_dim": 384,
-                "embedding_column": "bge_embedding",
-            })
+            json.dumps(
+                {
+                    "model_name": "BAAI/bge-small-en-v1.5",
+                    "embedding_dim": 384,
+                    "embedding_column": "bge_embedding",
+                }
+            )
         )
         assert validate(str(p), expected_dim=384) is True
 

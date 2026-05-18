@@ -1,9 +1,10 @@
 """Tests for KafkaConsumerLoop."""
+
 import os
 import sys
 import types
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch, call
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -14,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # Stub kafka if not installed
 try:
-    from kafka import TopicPartition, OffsetAndMetadata
+    from kafka import TopicPartition
 except Exception:
     kafka_stub = types.ModuleType("kafka")
 
@@ -40,12 +41,11 @@ except Exception:
     kafka_stub.TopicPartition = _TopicPartition
     kafka_stub.OffsetAndMetadata = _OffsetAndMetadata
     sys.modules["kafka"] = kafka_stub
-    from kafka import TopicPartition, OffsetAndMetadata
+    from kafka import TopicPartition
 
 from models import ProcessingResult
-from retry_router import RetryPublishedCommitFailedError, DlqPublishedCommitFailedError
+from retry_router import RetryPublishedCommitFailedError
 from kafka_loop import KafkaConsumerLoop
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -77,18 +77,21 @@ def _make_loop(kafka_consumer, retry_router):
     start_time = [0.0]
     last_poll_ts = [None]
 
-    return KafkaConsumerLoop(
-        kafka_consumer=kafka_consumer,
-        retry_router=retry_router,
-        paused_partitions={},
-        get_loop_alive=lambda: loop_alive[0],
-        set_loop_alive=lambda v: loop_alive.__setitem__(0, v),
-        get_event_count=lambda: event_count[0],
-        add_event_count=lambda n: event_count.__setitem__(0, event_count[0] + n),
-        get_start_time=lambda: start_time[0],
-        set_last_poll_ts=lambda ts: last_poll_ts.__setitem__(0, ts),
-        metrics_server=None,
-    ), loop_alive
+    return (
+        KafkaConsumerLoop(
+            kafka_consumer=kafka_consumer,
+            retry_router=retry_router,
+            paused_partitions={},
+            get_loop_alive=lambda: loop_alive[0],
+            set_loop_alive=lambda v: loop_alive.__setitem__(0, v),
+            get_event_count=lambda: event_count[0],
+            add_event_count=lambda n: event_count.__setitem__(0, event_count[0] + n),
+            get_start_time=lambda: start_time[0],
+            set_last_poll_ts=lambda ts: last_poll_ts.__setitem__(0, ts),
+            metrics_server=None,
+        ),
+        loop_alive,
+    )
 
 
 def _make_metrics_mock():
@@ -120,7 +123,9 @@ def test_commit_called_when_commit_safe(tmp_path):
     kafka_consumer.assignment.return_value = set()
 
     retry_router.process_message_internal.return_value = (
-        ProcessingResult.APPLIED, True, False
+        ProcessingResult.APPLIED,
+        True,
+        False,
     )
 
     loop, _ = _make_loop(kafka_consumer, retry_router)
@@ -164,7 +169,9 @@ def test_no_commit_when_commit_safe_false():
     kafka_consumer.assignment.return_value = set()
 
     retry_router.process_message_internal.return_value = (
-        ProcessingResult.TRANSIENT_FAILURE, False, False
+        ProcessingResult.TRANSIENT_FAILURE,
+        False,
+        False,
     )
 
     loop, _ = _make_loop(kafka_consumer, retry_router)
@@ -206,7 +213,7 @@ def test_commit_stops_at_first_unsafe_offset():
     kafka_consumer.assignment.return_value = set()
 
     retry_router.process_message_internal.side_effect = [
-        (ProcessingResult.APPLIED, True, False),   # msg1: safe
+        (ProcessingResult.APPLIED, True, False),  # msg1: safe
         (ProcessingResult.TRANSIENT_FAILURE, False, False),  # msg2: unsafe
     ]
 
@@ -319,4 +326,4 @@ def test_highest_safe_offset_per_partition():
     kafka_consumer.commit.assert_called_once()
     committed = kafka_consumer.commit.call_args.kwargs["offsets"]
     assert committed[tp0].offset == 12  # msg2.offset + 1
-    assert committed[tp1].offset == 8   # msg3.offset + 1
+    assert committed[tp1].offset == 8  # msg3.offset + 1

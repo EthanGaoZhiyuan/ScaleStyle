@@ -8,6 +8,7 @@ non-padded IDs that will never match the canonical IDs used by
 feature_reader.load_personalization_snapshot() on the read path (ZMSCORE
 requires exact member match).
 """
+
 import os
 import sys
 from pathlib import Path
@@ -23,7 +24,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from feature_update_handler import FeatureUpdateHandler
 from models import ProcessingResult
 from redis_metadata import canonical_article_id
-
 
 # ---------------------------------------------------------------------------
 # Fixtures (mirror test_feature_update_handler.py pattern)
@@ -95,58 +95,70 @@ class TestItemIdCanonicalization:
     """
 
     def test_numeric_id_is_zero_padded_to_10_digits(self, handler, lua_script):
-        handler.update_features({
-            "event_id": "evt-1",
-            "user_id": "test-user",
-            "item_id": "108775015",
-            "timestamp": "2026-01-01T00:00:00Z",
-        })
+        handler.update_features(
+            {
+                "event_id": "evt-1",
+                "user_id": "test-user",
+                "item_id": "108775015",
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        )
         assert _lua_argv3(lua_script) == "0108775015"
 
     def test_already_padded_id_is_unchanged(self, handler, lua_script):
-        handler.update_features({
-            "event_id": "evt-2",
-            "user_id": "test-user",
-            "item_id": "0108775015",
-            "timestamp": "2026-01-01T00:00:00Z",
-        })
+        handler.update_features(
+            {
+                "event_id": "evt-2",
+                "user_id": "test-user",
+                "item_id": "0108775015",
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        )
         assert _lua_argv3(lua_script) == "0108775015"
 
     def test_short_numeric_id_is_padded(self, handler, lua_script):
-        handler.update_features({
-            "event_id": "evt-3",
-            "user_id": "test-user",
-            "item_id": "5432",
-            "timestamp": "2026-01-01T00:00:00Z",
-        })
+        handler.update_features(
+            {
+                "event_id": "evt-3",
+                "user_id": "test-user",
+                "item_id": "5432",
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        )
         assert _lua_argv3(lua_script) == canonical_article_id("5432")
 
     def test_non_numeric_id_is_unchanged(self, handler, lua_script):
         """Non-numeric IDs (e.g., slugs, UUIDs) pass through unchanged."""
-        handler.update_features({
-            "event_id": "evt-4",
-            "user_id": "test-user",
-            "item_id": "shirt-abc-123",
-            "timestamp": "2026-01-01T00:00:00Z",
-        })
+        handler.update_features(
+            {
+                "event_id": "evt-4",
+                "user_id": "test-user",
+                "item_id": "shirt-abc-123",
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        )
         assert _lua_argv3(lua_script) == "shirt-abc-123"
 
     def test_empty_item_id_returns_permanent_failure(self, handler):
-        result = handler.update_features({
-            "event_id": "evt-5",
-            "user_id": "test-user",
-            "item_id": "",
-            "timestamp": "2026-01-01T00:00:00Z",
-        })
+        result = handler.update_features(
+            {
+                "event_id": "evt-5",
+                "user_id": "test-user",
+                "item_id": "",
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        )
         assert result == ProcessingResult.PERMANENT_FAILURE
 
     def test_none_item_id_returns_permanent_failure(self, handler):
-        result = handler.update_features({
-            "event_id": "evt-6",
-            "user_id": "test-user",
-            "item_id": None,
-            "timestamp": "2026-01-01T00:00:00Z",
-        })
+        result = handler.update_features(
+            {
+                "event_id": "evt-6",
+                "user_id": "test-user",
+                "item_id": None,
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        )
         assert result == ProcessingResult.PERMANENT_FAILURE
 
 
@@ -173,12 +185,14 @@ class TestWriterReaderKeyContract:
         canonical_article_id("0108775015") must equal "0108775015" (idempotent).
         """
         raw_id = "108775015"
-        handler.update_features({
-            "event_id": "evt-7",
-            "user_id": "test-user",
-            "item_id": raw_id,
-            "timestamp": "2026-01-01T00:00:00Z",
-        })
+        handler.update_features(
+            {
+                "event_id": "evt-7",
+                "user_id": "test-user",
+                "item_id": raw_id,
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        )
         written_id = _lua_argv3(lua_script)
         # Reader applies canonical_article_id once more on LRANGE result:
         assert canonical_article_id(written_id) == written_id
@@ -189,12 +203,14 @@ class TestWriterReaderKeyContract:
         canonical_candidate_id that the reader uses for ZMSCORE.
         """
         raw_id = "108775015"
-        handler.update_features({
-            "event_id": "evt-8",
-            "user_id": "test-user",
-            "item_id": raw_id,
-            "timestamp": "2026-01-01T00:00:00Z",
-        })
+        handler.update_features(
+            {
+                "event_id": "evt-8",
+                "user_id": "test-user",
+                "item_id": raw_id,
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        )
         written_id = _lua_argv3(lua_script)
         reader_candidate_id = canonical_article_id(raw_id)
         assert written_id == reader_candidate_id, (

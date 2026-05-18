@@ -17,20 +17,20 @@ import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
-
 # ---------------------------------------------------------------------------
 # Stub out heavy optional dependencies so vision.py can be imported
 # ---------------------------------------------------------------------------
 
+
 def _install_vision_stubs():
     # torch stub
     torch_mod = types.ModuleType("torch")
-    torch_mod.no_grad = MagicMock(return_value=MagicMock(
-        __enter__=lambda s, *a: s,
-        __exit__=lambda s, *a: None,
-    ))
+    torch_mod.no_grad = MagicMock(
+        return_value=MagicMock(
+            __enter__=lambda s, *a: s,
+            __exit__=lambda s, *a: None,
+        )
+    )
     torch_mod.cuda = MagicMock()
     torch_mod.cuda.is_available = lambda: False
     sys.modules.setdefault("torch", torch_mod)
@@ -81,10 +81,10 @@ _install_vision_stubs()
 # Now import the module under test
 from src.deployments.vision import VisionDeployment, _ImageEmbeddingCache  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Minimal VisionDeployment instance (bypasses __init__)
 # ---------------------------------------------------------------------------
+
 
 def _make_vision() -> VisionDeployment:
     """Return a VisionDeployment instance without running __init__."""
@@ -105,11 +105,12 @@ def _make_vision() -> VisionDeployment:
 # 1. Interface: all public methods are coroutines
 # ---------------------------------------------------------------------------
 
+
 class TestVisionAsyncInterface:
     def test_call_is_coroutine_function(self):
-        assert inspect.iscoroutinefunction(VisionDeployment.__call__), (
-            "__call__ must be async def so Ray Serve runs it on the event loop"
-        )
+        assert inspect.iscoroutinefunction(
+            VisionDeployment.__call__
+        ), "__call__ must be async def so Ray Serve runs it on the event loop"
 
     def test_search_by_image_is_coroutine_function(self):
         assert inspect.iscoroutinefunction(VisionDeployment.search_by_image)
@@ -131,6 +132,7 @@ class TestVisionAsyncInterface:
 # 2. Delegation: async wrappers use asyncio.to_thread
 # ---------------------------------------------------------------------------
 
+
 class TestVisionToThreadDelegation:
     """
     Each async method must hand off the blocking work to a thread via
@@ -142,44 +144,66 @@ class TestVisionToThreadDelegation:
 
     def test_search_by_image_uses_to_thread(self):
         vision = _make_vision()
-        sentinel = {"items": [], "status": "success", "mode": "image", "query_time_ms": 1.0}
-        with patch("asyncio.to_thread", new=AsyncMock(return_value=sentinel)) as mock_to_thread:
+        sentinel = {
+            "items": [],
+            "status": "success",
+            "mode": "image",
+            "query_time_ms": 1.0,
+        }
+        with patch(
+            "asyncio.to_thread", new=AsyncMock(return_value=sentinel)
+        ) as mock_to_thread:
             result = self._run(vision.search_by_image({"image_base64": "ZmFrZQ=="}))
         mock_to_thread.assert_awaited_once()
         first_arg = mock_to_thread.call_args[0][0]
-        assert first_arg == vision._search_by_image_sync, (
-            "search_by_image must delegate to _search_by_image_sync via to_thread"
-        )
+        assert (
+            first_arg == vision._search_by_image_sync
+        ), "search_by_image must delegate to _search_by_image_sync via to_thread"
         assert result == sentinel
 
     def test_search_by_text_uses_to_thread(self):
         vision = _make_vision()
-        sentinel = {"items": [], "status": "success", "mode": "text_to_image", "query_time_ms": 1.0}
-        with patch("asyncio.to_thread", new=AsyncMock(return_value=sentinel)) as mock_to_thread:
+        sentinel = {
+            "items": [],
+            "status": "success",
+            "mode": "text_to_image",
+            "query_time_ms": 1.0,
+        }
+        with patch(
+            "asyncio.to_thread", new=AsyncMock(return_value=sentinel)
+        ) as mock_to_thread:
             result = self._run(vision.search_by_text({"query": "red dress"}))
         mock_to_thread.assert_awaited_once()
         first_arg = mock_to_thread.call_args[0][0]
-        assert first_arg == vision._search_by_text_sync, (
-            "search_by_text must delegate to _search_by_text_sync via to_thread"
-        )
+        assert (
+            first_arg == vision._search_by_text_sync
+        ), "search_by_text must delegate to _search_by_text_sync via to_thread"
         assert result == sentinel
 
     def test_search_multimodal_uses_to_thread(self):
         vision = _make_vision()
-        sentinel = {"items": [], "status": "success", "mode": "multimodal", "query_time_ms": 1.0}
-        with patch("asyncio.to_thread", new=AsyncMock(return_value=sentinel)) as mock_to_thread:
+        sentinel = {
+            "items": [],
+            "status": "success",
+            "mode": "multimodal",
+            "query_time_ms": 1.0,
+        }
+        with patch(
+            "asyncio.to_thread", new=AsyncMock(return_value=sentinel)
+        ) as mock_to_thread:
             result = self._run(vision.search_multimodal({"query": "dress"}))
         mock_to_thread.assert_awaited_once()
         first_arg = mock_to_thread.call_args[0][0]
-        assert first_arg == vision._search_multimodal_sync, (
-            "search_multimodal must delegate to _search_multimodal_sync via to_thread"
-        )
+        assert (
+            first_arg == vision._search_multimodal_sync
+        ), "search_multimodal must delegate to _search_multimodal_sync via to_thread"
         assert result == sentinel
 
 
 # ---------------------------------------------------------------------------
 # 3. Routing: __call__ dispatches to the correct async method
 # ---------------------------------------------------------------------------
+
 
 class TestVisionCallRouting:
     def _run(self, coro):
@@ -200,7 +224,7 @@ class TestVisionCallRouting:
         vision = _make_vision()
         sentinel = self._make_sentinel("image")
         vision.search_by_image = AsyncMock(return_value=sentinel)
-        result = self._run(vision({"mode": "image_to_image", "image_base64": "ZmFrZQ=="}))
+        self._run(vision({"mode": "image_to_image", "image_base64": "ZmFrZQ=="}))
         vision.search_by_image.assert_awaited_once()
 
     def test_call_text_to_image_routes_to_search_by_text(self):
@@ -215,7 +239,9 @@ class TestVisionCallRouting:
         vision = _make_vision()
         sentinel = self._make_sentinel("multimodal")
         vision.search_multimodal = AsyncMock(return_value=sentinel)
-        result = self._run(vision({"mode": "multimodal", "query": "dress", "image_base64": "ZmFrZQ=="}))
+        result = self._run(
+            vision({"mode": "multimodal", "query": "dress", "image_base64": "ZmFrZQ=="})
+        )
         vision.search_multimodal.assert_awaited_once()
         assert result == sentinel
 
@@ -237,6 +263,7 @@ class TestVisionCallRouting:
 # 4. Concurrency: two awaited calls don't serialize on the event loop
 # ---------------------------------------------------------------------------
 
+
 class TestVisionConcurrency:
     """
     With asyncio.to_thread, two concurrent search_by_image calls should
@@ -245,7 +272,12 @@ class TestVisionConcurrency:
 
     def test_two_image_searches_can_be_gathered(self):
         vision = _make_vision()
-        sentinel = {"items": [], "status": "success", "mode": "image", "query_time_ms": 5.0}
+        sentinel = {
+            "items": [],
+            "status": "success",
+            "mode": "image",
+            "query_time_ms": 5.0,
+        }
 
         call_count = {"n": 0}
 

@@ -6,7 +6,13 @@ degradation in K8s deployments without explicit overrides.
 """
 
 import os
-from src.config import EmbeddingConfig, RetrievalConfig, RerankerConfig, GenerationConfig, PersonalizationConfig
+from src.config import (
+    EmbeddingConfig,
+    RetrievalConfig,
+    RerankerConfig,
+    GenerationConfig,
+    PersonalizationConfig,
+)
 
 
 def test_embedding_timeout_production_viable():
@@ -88,9 +94,9 @@ def test_timeout_hierarchy_within_gateway_deadline():
     }
 
     for name, value in docker_overrides.items():
-        assert value < GATEWAY_DEADLINE_MS, (
-            f"{name}={value}ms exceeds gateway deadline {GATEWAY_DEADLINE_MS}ms"
-        )
+        assert (
+            value < GATEWAY_DEADLINE_MS
+        ), f"{name}={value}ms exceeds gateway deadline {GATEWAY_DEADLINE_MS}ms"
 
     # Document that actual config.py defaults match expectations
     assert EmbeddingConfig.TIMEOUT_MS == 500

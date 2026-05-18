@@ -389,7 +389,8 @@ class EventConsumer:
                 if "Unrecognized configs" in str(e):
                     # kafka-python 2.0.2 does not support enable_idempotence / delivery_timeout_ms
                     logger.warning(
-                        "kafka-python does not support extended producer configs, using base config: %s", e
+                        "kafka-python does not support extended producer configs, using base config: %s",
+                        e,
                     )
                     self.kafka_producer = KafkaProducer(**base_kwargs)
                 else:

@@ -8,6 +8,7 @@ path (generate_embeddings → bootstrap_data → Milvus/Redis).
 
 Do not import this module from bootstrap_data.py or any serving-path code.
 """
+
 # ==============================================================================
 # FEATURE ENGINEERING MODULE (STATIC FEATURES)
 # ------------------------------------------------------------------------------

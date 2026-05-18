@@ -139,7 +139,9 @@ def test_multimodal_handler_uses_dual_recall_merge_rerank(monkeypatch):
 
             return Pipe()
 
-    monkeypatch.setattr("src.utils.redis_client.RedisClient.get_client", lambda: DummyRedis())
+    monkeypatch.setattr(
+        "src.utils.redis_client.RedisClient.get_client", lambda: DummyRedis()
+    )
 
     from src.deployments.ingress import IngressDeployment
 

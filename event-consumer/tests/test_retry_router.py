@@ -1,4 +1,5 @@
 """Tests for RetryRouter."""
+
 import os
 import sys
 import types
@@ -24,7 +25,11 @@ except Exception:
             self.partition = partition
 
         def __eq__(self, other):
-            return isinstance(other, _TopicPartition) and self.topic == other.topic and self.partition == other.partition
+            return (
+                isinstance(other, _TopicPartition)
+                and self.topic == other.topic
+                and self.partition == other.partition
+            )
 
         def __hash__(self):
             return hash((self.topic, self.partition))
@@ -43,7 +48,6 @@ from retry_router import (
     RetryPublishedCommitFailedError,
     DlqPublishedCommitFailedError,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -203,6 +207,7 @@ def test_transient_failure_routes_to_retry_tier_1(
     kafka_producer.send.assert_called_once()
     topic_sent = kafka_producer.send.call_args.args[0]
     import config
+
     assert topic_sent == config.KAFKA_RETRY_TOPIC_1S
     kafka_consumer.commit.assert_called_once()
 
@@ -211,13 +216,16 @@ def test_transient_failure_retry_2_routes_to_tier_2(
     router, feature_handler, kafka_producer, kafka_consumer
 ):
     import config
+
     feature_handler.update_features.return_value = ProcessingResult.TRANSIENT_FAILURE
     msg = _message_of(
         _valid_event(),
         topic=config.KAFKA_RETRY_TOPIC_1S,
         headers=[(config.KAFKA_RETRY_HEADER, b"1")],
     )
-    result, commit_safe, _ = router.process_message_internal(msg, commit_immediately=True)
+    result, commit_safe, _ = router.process_message_internal(
+        msg, commit_immediately=True
+    )
     assert result == ProcessingResult.TRANSIENT_FAILURE
     topic_sent = kafka_producer.send.call_args.args[0]
     assert topic_sent == config.KAFKA_RETRY_TOPIC_10S
@@ -232,6 +240,7 @@ def test_max_retries_exceeded_routes_to_dlq(
     router, feature_handler, kafka_producer, kafka_consumer
 ):
     import config
+
     feature_handler.update_features.return_value = ProcessingResult.TRANSIENT_FAILURE
     msg = _message_of(
         _valid_event(),
@@ -245,7 +254,8 @@ def test_max_retries_exceeded_routes_to_dlq(
     assert commit_safe is True
     assert strict is True
     dlq_calls = [
-        c for c in kafka_producer.send.call_args_list
+        c
+        for c in kafka_producer.send.call_args_list
         if c.args[0] == config.KAFKA_DLQ_TOPIC
     ]
     assert len(dlq_calls) == 1
@@ -262,6 +272,7 @@ def test_permanent_failure_routes_to_dlq(
     router, feature_handler, kafka_producer, kafka_consumer
 ):
     import config
+
     feature_handler.update_features.return_value = ProcessingResult.PERMANENT_FAILURE
     result, commit_safe, strict = router.process_message_internal(
         _message_of(_valid_event()), commit_immediately=True
@@ -269,7 +280,8 @@ def test_permanent_failure_routes_to_dlq(
     assert result == ProcessingResult.PERMANENT_FAILURE
     assert commit_safe is True
     dlq_calls = [
-        c for c in kafka_producer.send.call_args_list
+        c
+        for c in kafka_producer.send.call_args_list
         if c.args[0] == config.KAFKA_DLQ_TOPIC
     ]
     assert len(dlq_calls) == 1
@@ -349,7 +361,10 @@ def test_dlq_duplicate_suppression_commits_safely(
     # No Kafka send for DLQ (duplicate suppressed)
     for call in kafka_producer.send.call_args_list:
         import config
-        assert call.args[0] != config.KAFKA_DLQ_TOPIC, "Should not send duplicate to DLQ"
+
+        assert (
+            call.args[0] != config.KAFKA_DLQ_TOPIC
+        ), "Should not send duplicate to DLQ"
     kafka_consumer.commit.assert_called_once()
 
 
@@ -358,15 +373,17 @@ def test_dlq_duplicate_suppression_commits_safely(
 # ---------------------------------------------------------------------------
 
 
-def test_dlq_payload_contains_canonical_fields(
-    router, feature_handler, kafka_producer
-):
+def test_dlq_payload_contains_canonical_fields(router, feature_handler, kafka_producer):
     import config
+
     feature_handler.update_features.return_value = ProcessingResult.PERMANENT_FAILURE
-    msg = _message_of(_valid_event(), topic="scalestyle.clicks", partition=3, offset=100)
+    msg = _message_of(
+        _valid_event(), topic="scalestyle.clicks", partition=3, offset=100
+    )
     router.process_message_internal(msg, commit_immediately=False)
     dlq_calls = [
-        c for c in kafka_producer.send.call_args_list
+        c
+        for c in kafka_producer.send.call_args_list
         if c.args[0] == config.KAFKA_DLQ_TOPIC
     ]
     assert dlq_calls, "Expected a DLQ send"

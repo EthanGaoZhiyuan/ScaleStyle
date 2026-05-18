@@ -4,8 +4,6 @@ import os
 import sys
 from pathlib import Path
 
-import pytest
-
 os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", "test-kafka:9093")
 os.environ.setdefault("CONSUMER_MODE", "primary")
 
@@ -38,10 +36,15 @@ class TestProcessingResult:
     def test_enum_identity(self):
         assert ProcessingResult("applied") is ProcessingResult.APPLIED
         assert ProcessingResult("duplicate") is ProcessingResult.DUPLICATE
-        assert ProcessingResult("transient_failure") is ProcessingResult.TRANSIENT_FAILURE
-        assert ProcessingResult("permanent_failure") is ProcessingResult.PERMANENT_FAILURE
+        assert (
+            ProcessingResult("transient_failure") is ProcessingResult.TRANSIENT_FAILURE
+        )
+        assert (
+            ProcessingResult("permanent_failure") is ProcessingResult.PERMANENT_FAILURE
+        )
 
     def test_consumer_module_reexports_same_class(self):
         """consumer.ProcessingResult must be the same object as models.ProcessingResult."""
         from consumer import ProcessingResult as ConsumerProcessingResult
+
         assert ConsumerProcessingResult is ProcessingResult

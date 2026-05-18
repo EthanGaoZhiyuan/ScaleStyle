@@ -4,19 +4,15 @@ Unit tests for bootstrap_image_collection.py.
 Covers validate_parquet (the only pure function) — no Milvus connection required.
 """
 
-import tempfile
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import pytest
 
 from src.bootstrap_image_collection import (
-    DEFAULT_EXPECTED_DIM,
     DEFAULT_VECTOR_FIELD,
     validate_parquet,
 )
-
 
 # ──────────────────────────── helpers ────────────────────────────
 
@@ -88,10 +84,12 @@ def test_validate_parquet_missing_article_id_column(tmp_path):
 def test_validate_parquet_missing_vector_column(tmp_path):
     p = tmp_path / "emb.parquet"
     # Write parquet without the vector field entirely
-    df = pd.DataFrame({
-        "article_id": [1, 2],
-        "image_path": ["/a.jpg", "/b.jpg"],
-    })
+    df = pd.DataFrame(
+        {
+            "article_id": [1, 2],
+            "image_path": ["/a.jpg", "/b.jpg"],
+        }
+    )
     df.to_parquet(str(p), index=False)
     with pytest.raises(ValueError, match="Missing required columns"):
         validate_parquet(str(p))
@@ -135,15 +133,17 @@ def test_validate_parquet_null_embeddings(tmp_path):
 
 def test_validate_parquet_inconsistent_dimensions(tmp_path):
     p = tmp_path / "emb.parquet"
-    df = pd.DataFrame({
-        "article_id": [1, 2, 3],
-        "image_path": ["/a.jpg", "/b.jpg", "/c.jpg"],
-        DEFAULT_VECTOR_FIELD: [
-            [0.0] * 512,
-            [0.0] * 256,  # wrong dim
-            [0.0] * 512,
-        ],
-    })
+    df = pd.DataFrame(
+        {
+            "article_id": [1, 2, 3],
+            "image_path": ["/a.jpg", "/b.jpg", "/c.jpg"],
+            DEFAULT_VECTOR_FIELD: [
+                [0.0] * 512,
+                [0.0] * 256,  # wrong dim
+                [0.0] * 512,
+            ],
+        }
+    )
     df.to_parquet(str(p), index=False)
     with pytest.raises(ValueError, match="[Ii]nconsistent"):
         validate_parquet(str(p))

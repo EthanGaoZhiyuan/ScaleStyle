@@ -4,8 +4,6 @@ import os
 import sys
 from pathlib import Path
 
-import pytest
-
 os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", "test-kafka:9093")
 os.environ.setdefault("CONSUMER_MODE", "primary")
 

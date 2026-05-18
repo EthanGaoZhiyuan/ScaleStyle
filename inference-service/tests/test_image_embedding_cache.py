@@ -19,18 +19,19 @@ import time
 import types
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-
 # ---------------------------------------------------------------------------
 # Stub heavy dependencies (identical to test_vision_async.py pattern)
 # ---------------------------------------------------------------------------
 
+
 def _install_vision_stubs():
     torch_mod = types.ModuleType("torch")
-    torch_mod.no_grad = MagicMock(return_value=MagicMock(
-        __enter__=lambda s, *a: s, __exit__=lambda s, *a: None,
-    ))
+    torch_mod.no_grad = MagicMock(
+        return_value=MagicMock(
+            __enter__=lambda s, *a: s,
+            __exit__=lambda s, *a: None,
+        )
+    )
     torch_mod.cuda = MagicMock()
     torch_mod.cuda.is_available = lambda: False
     sys.modules.setdefault("torch", torch_mod)
@@ -47,7 +48,9 @@ def _install_vision_stubs():
     pil_mod = types.ModuleType("PIL")
     pil_image_mod = types.ModuleType("PIL.Image")
     pil_image_mod.Image = MagicMock()
-    pil_image_mod.open = MagicMock(return_value=MagicMock(convert=lambda m: MagicMock()))
+    pil_image_mod.open = MagicMock(
+        return_value=MagicMock(convert=lambda m: MagicMock())
+    )
     pil_mod.Image = pil_image_mod
     sys.modules.setdefault("PIL", pil_mod)
     sys.modules.setdefault("PIL.Image", pil_image_mod)
@@ -71,10 +74,10 @@ _install_vision_stubs()
 
 from src.deployments.vision import _ImageEmbeddingCache, VisionDeployment  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_vision(model_name="test-model") -> VisionDeployment:
     """Return a VisionDeployment bypassing __init__, with cache attached."""
@@ -98,6 +101,7 @@ def _b64(data: bytes) -> str:
 # ---------------------------------------------------------------------------
 # _ImageEmbeddingCache unit tests
 # ---------------------------------------------------------------------------
+
 
 class TestImageEmbeddingCache:
 
@@ -166,6 +170,7 @@ class TestImageEmbeddingCache:
 
     def test_thread_safety_concurrent_puts(self):
         import threading
+
         cache = _ImageEmbeddingCache(max_size=1000)
         errors = []
 
@@ -190,6 +195,7 @@ class TestImageEmbeddingCache:
 # VisionDeployment cache integration tests
 # ---------------------------------------------------------------------------
 
+
 class TestVisionDeploymentCaching:
 
     def test_same_base64_encodes_only_once(self):
@@ -201,7 +207,9 @@ class TestVisionDeploymentCaching:
         img_bytes = b"fake-image-data"
         b64 = _b64(img_bytes)
 
-        with patch("PIL.Image.open", return_value=MagicMock(convert=lambda m: MagicMock())):
+        with patch(
+            "PIL.Image.open", return_value=MagicMock(convert=lambda m: MagicMock())
+        ):
             emb1 = vision._encode_image_from_base64_cached(b64)
             emb2 = vision._encode_image_from_base64_cached(b64)
 
@@ -219,7 +227,9 @@ class TestVisionDeploymentCaching:
         b64_a = _b64(b"image-content-a")
         b64_b = _b64(b"image-content-b")
 
-        with patch("PIL.Image.open", return_value=MagicMock(convert=lambda m: MagicMock())):
+        with patch(
+            "PIL.Image.open", return_value=MagicMock(convert=lambda m: MagicMock())
+        ):
             result_a = vision._encode_image_from_base64_cached(b64_a)
             result_b = vision._encode_image_from_base64_cached(b64_b)
 
@@ -236,13 +246,17 @@ class TestVisionDeploymentCaching:
 
         img_b64 = _b64(b"same-image")
 
-        with patch("PIL.Image.open", return_value=MagicMock(convert=lambda m: MagicMock())):
+        with patch(
+            "PIL.Image.open", return_value=MagicMock(convert=lambda m: MagicMock())
+        ):
             r1 = vision._encode_image_from_base64_cached(img_b64)
 
         # Switch model name — simulates model upgrade
         vision.model_name = "clip-v2"
 
-        with patch("PIL.Image.open", return_value=MagicMock(convert=lambda m: MagicMock())):
+        with patch(
+            "PIL.Image.open", return_value=MagicMock(convert=lambda m: MagicMock())
+        ):
             r2 = vision._encode_image_from_base64_cached(img_b64)
 
         assert vision._encode_image.call_count == 2
@@ -274,7 +288,9 @@ class TestVisionDeploymentCaching:
         assert vision._image_cache.misses == 0
         assert vision._image_cache.hits == 0
 
-        with patch("PIL.Image.open", return_value=MagicMock(convert=lambda m: MagicMock())):
+        with patch(
+            "PIL.Image.open", return_value=MagicMock(convert=lambda m: MagicMock())
+        ):
             vision._encode_image_from_base64_cached(b64)  # miss
             vision._encode_image_from_base64_cached(b64)  # hit
 

@@ -211,7 +211,9 @@ def load_price_enrichment(transactions_path: str) -> pd.DataFrame | None:
         return None
 
     try:
-        logger.info("Loading transactions for price enrichment from: %s", transactions_path)
+        logger.info(
+            "Loading transactions for price enrichment from: %s", transactions_path
+        )
         df_tx = _read_flexible(transactions_path, columns=["article_id", "price"])
         df_price = df_tx.groupby("article_id", as_index=False)["price"].mean()
         logger.info("Computed mean price for %d articles", len(df_price))
@@ -301,7 +303,9 @@ def generate_embeddings(
     texts = [build_product_text(row) for row in df.to_dict("records")]
 
     all_chunks: list[np.ndarray] = []
-    for i in tqdm(range(0, len(texts), batch_size), desc="Embedding batches", unit="batch"):
+    for i in tqdm(
+        range(0, len(texts), batch_size), desc="Embedding batches", unit="batch"
+    ):
         chunk_embs = model.embed_batch(texts[i : i + batch_size])
         all_chunks.append(chunk_embs)
 
@@ -490,7 +494,9 @@ def main() -> None:
 
     if args.limit is not None:
         df = df.head(args.limit).reset_index(drop=True)
-        logger.info("--limit %d applied: processing first %d articles", args.limit, len(df))
+        logger.info(
+            "--limit %d applied: processing first %d articles", args.limit, len(df)
+        )
 
     # ── Price enrichment (optional) ──
     df_price = load_price_enrichment(args.transactions)
@@ -498,7 +504,10 @@ def main() -> None:
         df = df.merge(df_price, on="article_id", how="left")
         null_price = int(df["price"].isna().sum())
         if null_price:
-            logger.info("Price merged; %d articles have no transaction data (price=NaN)", null_price)
+            logger.info(
+                "Price merged; %d articles have no transaction data (price=NaN)",
+                null_price,
+            )
     elif "price" not in df.columns:
         df["price"] = None
         logger.warning("No price data available; 'price' column will be null")
@@ -566,7 +575,9 @@ def main() -> None:
     print(f"  Sample[0]:  [{sample_vec[0]:.6f}, {sample_vec[1]:.6f}, ...]")
     print("=" * 60)
     print("\nNext step:")
-    print(f"  python data-pipeline/src/bootstrap_data.py --parquet {output_path} --drop-existing")
+    print(
+        f"  python data-pipeline/src/bootstrap_data.py --parquet {output_path} --drop-existing"
+    )
 
 
 if __name__ == "__main__":

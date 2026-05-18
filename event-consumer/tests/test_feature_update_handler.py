@@ -1,4 +1,5 @@
 """Tests for FeatureUpdateHandler."""
+
 import os
 import sys
 from pathlib import Path

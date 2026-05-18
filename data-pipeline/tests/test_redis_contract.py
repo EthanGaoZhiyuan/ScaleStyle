@@ -86,9 +86,24 @@ def test_load_popularity_writes_purchase_counts_as_zset_scores(monkeypatch):
 
     top_items = pd.DataFrame(
         [
-            {"article_id": "0000111111", "purchase_count": 500, "popularity_score": 1.0, "rank": 1},
-            {"article_id": "0000222222", "purchase_count": 300, "popularity_score": 0.6, "rank": 2},
-            {"article_id": "0000333333", "purchase_count": 100, "popularity_score": 0.2, "rank": 3},
+            {
+                "article_id": "0000111111",
+                "purchase_count": 500,
+                "popularity_score": 1.0,
+                "rank": 1,
+            },
+            {
+                "article_id": "0000222222",
+                "purchase_count": 300,
+                "popularity_score": 0.6,
+                "rank": 2,
+            },
+            {
+                "article_id": "0000333333",
+                "purchase_count": 100,
+                "popularity_score": 0.2,
+                "rank": 3,
+            },
         ]
     )
 

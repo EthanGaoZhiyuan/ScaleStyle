@@ -32,7 +32,12 @@ TOP_ITEMS_PARQUET_PATH = os.getenv(
 
 ARTICLE_EMBEDDINGS_PATH = os.getenv(
     "ARTICLE_EMBEDDINGS_PATH",
-    str(BASE_DIR / "data" / "processed" / "article_embeddings_bge_small_v1_5_detail.parquet"),
+    str(
+        BASE_DIR
+        / "data"
+        / "processed"
+        / "article_embeddings_bge_small_v1_5_detail.parquet"
+    ),
 )
 
 # Canonical embedding column name — must match generate_embeddings.py and bootstrap_data.py

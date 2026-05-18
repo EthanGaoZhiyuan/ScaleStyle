@@ -66,7 +66,9 @@ EXPECTED_EMBEDDING_DIM = int(os.getenv("EXPECTED_EMBEDDING_DIM", "384"))
 # bootstrap_data.py produces consistent paths regardless of the working directory
 # it is invoked from.
 _PIPELINE_ROOT = Path(__file__).parent.parent.resolve()
-_DEFAULT_METADATA_OUTPUT = str(_PIPELINE_ROOT / "data" / "processed" / "product_metadata.json")
+_DEFAULT_METADATA_OUTPUT = str(
+    _PIPELINE_ROOT / "data" / "processed" / "product_metadata.json"
+)
 
 # Default top_items paths (searched in order; first existing file wins).
 DEFAULT_TOP_ITEMS_PATHS = [
@@ -442,11 +444,14 @@ def main():
             load_popularity(top_items_df)
         elif args.transactions:
             from src.generate_top_items import compute_top_items
+
             print(f"  Computing popularity from {args.transactions}...")
             top_items_df = compute_top_items(args.transactions)
             load_popularity(top_items_df)
         elif args.allow_empty_popularity:
-            print("  --allow-empty-popularity: skipping global:popular (fallback will be empty)")
+            print(
+                "  --allow-empty-popularity: skipping global:popular (fallback will be empty)"
+            )
         else:
             print(
                 "No popularity source found.\n"

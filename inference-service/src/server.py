@@ -26,7 +26,11 @@ logger = logging.getLogger("scalestyle.server")
 VISION_ENABLED = os.getenv("VISION_ENABLED", "0").lower() in ("1", "true", "yes")
 
 # Feature flag: Enable generation deployment (Qwen2 LLM for recommendation explanations)
-GENERATION_ENABLED = os.getenv("GENERATION_ENABLED", "0").lower() in ("1", "true", "yes")
+GENERATION_ENABLED = os.getenv("GENERATION_ENABLED", "0").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 if VISION_ENABLED:
     try:
@@ -58,9 +62,7 @@ validate_startup_connection()
 ray.init(
     ignore_reinit_error=True,
     _memory=int(RAY_MEMORY_GB * 1024 * 1024 * 1024),  # heap budget (Ray 2.x built-in)
-    object_store_memory=int(
-        RAY_OBJECT_STORE_GB * 1024 * 1024 * 1024
-    ),
+    object_store_memory=int(RAY_OBJECT_STORE_GB * 1024 * 1024 * 1024),
 )
 serve.start(detached=True, http_options={"host": "0.0.0.0", "port": 8000})
 

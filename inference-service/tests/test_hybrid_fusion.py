@@ -13,10 +13,10 @@ from deployments.multimodal import (
 from personalization.behavior_boost import BehaviorBoost
 from personalization.snapshot import PersonalizationSnapshot
 
-
 # ---------------------------------------------------------------------------
 # _minmax_normalize
 # ---------------------------------------------------------------------------
+
 
 def test_minmax_normalize_varying():
     scores = {"a": 0.2, "b": 0.5, "c": 1.0}
@@ -40,6 +40,7 @@ def test_minmax_normalize_empty():
 # ---------------------------------------------------------------------------
 # fuse_with_normalized_scores — article_id canonicalization
 # ---------------------------------------------------------------------------
+
 
 def test_fusion_canonicalizes_int_and_padded_string_to_same_key():
     """Int 108775015 and string '0108775015' must merge into one candidate."""
@@ -76,12 +77,17 @@ def test_fusion_canonical_itemid_zfill():
 # fuse_with_normalized_scores — score normalization
 # ---------------------------------------------------------------------------
 
+
 def test_fusion_single_image_candidate_normalizes_to_one():
     """Single candidate on one side → normalized score = 1.0, all-equal path."""
     image_candidates = [{"article_id": "1234567890", "score": 0.75}]
     results = fuse_with_normalized_scores(
-        [], image_candidates, limit=5,
-        image_weight=0.5, text_weight=0.4, behavior_weight=0.1,
+        [],
+        image_candidates,
+        limit=5,
+        image_weight=0.5,
+        text_weight=0.4,
+        behavior_weight=0.1,
     )
     assert len(results) == 1
     # normalized_image_score = 1.0, norm_text = 0.0, behavior = 0.0
@@ -101,8 +107,12 @@ def test_fusion_formula_image_and_text_candidate():
     ]
 
     results = fuse_with_normalized_scores(
-        text_candidates, image_candidates, limit=10,
-        image_weight=0.5, text_weight=0.4, behavior_weight=0.1,
+        text_candidates,
+        image_candidates,
+        limit=10,
+        image_weight=0.5,
+        text_weight=0.4,
+        behavior_weight=0.1,
     )
 
     by_id = {r["article_id"]: r for r in results}
@@ -121,6 +131,7 @@ def test_fusion_formula_image_and_text_candidate():
 # ---------------------------------------------------------------------------
 # fuse_with_normalized_scores — fallback / degenerate inputs
 # ---------------------------------------------------------------------------
+
 
 def test_fusion_image_only_when_text_empty():
     """Empty text candidates → image-only fusion, degraded path coverage."""
@@ -152,7 +163,9 @@ def test_fusion_both_empty_returns_empty():
 
 
 def test_fusion_limit_respected():
-    image_candidates = [{"article_id": str(i).zfill(10), "score": float(i)} for i in range(20)]
+    image_candidates = [
+        {"article_id": str(i).zfill(10), "score": float(i)} for i in range(20)
+    ]
     results = fuse_with_normalized_scores([], image_candidates, limit=5)
     assert len(results) == 5
 
@@ -171,6 +184,7 @@ def test_fusion_zero_weights_fallback_to_defaults():
 # fuse_with_normalized_scores — behavior_score starts at 0.0 before post-fusion boost
 # ---------------------------------------------------------------------------
 
+
 def test_fusion_behavior_score_is_zero():
     """fuse_with_normalized_scores sets behavior_score=0.0; post-fusion boost populates it."""
     candidates = [{"article_id": "0000000040", "score": 0.8}]
@@ -181,6 +195,7 @@ def test_fusion_behavior_score_is_zero():
 # ---------------------------------------------------------------------------
 # apply_behavior_boost_to_hybrid_results
 # ---------------------------------------------------------------------------
+
 
 def _make_snapshot(**kwargs):
     base = PersonalizationSnapshot(

@@ -6,10 +6,8 @@ Tests cover pure helper functions and the validation path using fake parquets.
 """
 
 import json
-import tempfile
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -22,7 +20,6 @@ from src.generate_image_embeddings import (
     select_device,
 )
 from src.validate_image_embeddings import validate
-
 
 # ──────────────────────────── normalize_article_id ────────────────────────────
 
@@ -135,6 +132,7 @@ def test_select_device_cpu_returns_float32():
     device, dtype = select_device("cpu")
     assert device == "cpu"
     import torch
+
     assert dtype == torch.float32
 
 
@@ -142,6 +140,7 @@ def test_select_device_mps_returns_float32():
     device, dtype = select_device("mps")
     assert device == "mps"
     import torch
+
     assert dtype == torch.float32
 
 
@@ -149,13 +148,16 @@ def test_select_device_cuda_returns_float16():
     device, dtype = select_device("cuda")
     assert device == "cuda"
     import torch
+
     assert dtype == torch.float16
 
 
 # ──────────────────────────── validate_image_embeddings ────────────────────────────
 
 
-def _make_fake_parquet(path: Path, dim: int = 512, n_rows: int = 5, null_emb: bool = False):
+def _make_fake_parquet(
+    path: Path, dim: int = 512, n_rows: int = 5, null_emb: bool = False
+):
     """Write a minimal valid (or deliberately invalid) image embedding parquet."""
     emb = [None if null_emb else [float(i) / (dim or 1)] * dim for i in range(n_rows)]
     df = pd.DataFrame(
@@ -216,7 +218,16 @@ def test_validate_checks_sidecar_dim_mismatch(tmp_path):
     _make_fake_parquet(p, dim=512)
     # Write a sidecar claiming wrong dim
     sidecar = p.with_suffix(".meta.json")
-    sidecar.write_text(json.dumps({"embedding_dim": 256, "model_name": "clip", "vector_field": "image_embedding", "row_count": 5}))
+    sidecar.write_text(
+        json.dumps(
+            {
+                "embedding_dim": 256,
+                "model_name": "clip",
+                "vector_field": "image_embedding",
+                "row_count": 5,
+            }
+        )
+    )
     # Hard check passes (actual parquet is 512), but sidecar warning is emitted
     result = validate(str(p), expected_dim=512)
     assert result is True  # warning only, not a hard failure

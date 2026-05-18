@@ -5,6 +5,7 @@ kafka-python 2.0.2 (2-arg) and 2.3.x (3-arg) respectively. Each test
 uses a self-contained module reload that restores all affected sys.modules
 entries on exit, so this file never pollutes the shared test session.
 """
+
 import sys
 import types
 import inspect
@@ -129,7 +130,7 @@ class TestMakeOffsetAndMetadata:
         """_OAM_NEEDS_LEADER_EPOCH is driven by __new__ parameter count."""
         two_arg_count = len(inspect.signature(_OAM_TwoArg.__new__).parameters)
         three_arg_count = len(inspect.signature(_OAM_ThreeArg.__new__).parameters)
-        assert two_arg_count == 3   # cls, offset, metadata
+        assert two_arg_count == 3  # cls, offset, metadata
         assert three_arg_count == 4  # cls, offset, metadata, leader_epoch
 
         with _kafka_utils_with_stub(_OAM_TwoArg) as ku:

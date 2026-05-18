@@ -33,7 +33,9 @@ DEFAULT_TRANSACTIONS_PATHS = [
 DEFAULT_OUTPUT_PATH = str(_DATA_DIR / "processed" / "top_items.parquet")
 
 
-def count_purchases(df: pd.DataFrame, topn: int = POPULARITY_CANDIDATE_TOPN) -> pd.DataFrame:
+def count_purchases(
+    df: pd.DataFrame, topn: int = POPULARITY_CANDIDATE_TOPN
+) -> pd.DataFrame:
     """
     Group transaction rows by article_id and rank by purchase frequency.
 
@@ -50,9 +52,11 @@ def count_purchases(df: pd.DataFrame, topn: int = POPULARITY_CANDIDATE_TOPN) -> 
         .reset_index()
     )
 
-    counts = counts.sort_values(
-        ["purchase_count", "article_id"], ascending=[False, True]
-    ).head(topn).reset_index(drop=True)
+    counts = (
+        counts.sort_values(["purchase_count", "article_id"], ascending=[False, True])
+        .head(topn)
+        .reset_index(drop=True)
+    )
 
     counts["article_id"] = counts["article_id"].str.zfill(10)
     counts["rank"] = counts.index + 1
@@ -62,7 +66,9 @@ def count_purchases(df: pd.DataFrame, topn: int = POPULARITY_CANDIDATE_TOPN) -> 
     return counts[["article_id", "purchase_count", "popularity_score", "rank"]]
 
 
-def compute_top_items(csv_path: str, topn: int = POPULARITY_CANDIDATE_TOPN) -> pd.DataFrame:
+def compute_top_items(
+    csv_path: str, topn: int = POPULARITY_CANDIDATE_TOPN
+) -> pd.DataFrame:
     """Read transactions CSV and return a ranked popularity DataFrame."""
     print(f"Reading transactions from {csv_path}...")
     df = pd.read_csv(csv_path, usecols=["article_id"], dtype={"article_id": str})
@@ -90,10 +96,21 @@ def validate_top_items(df: pd.DataFrame) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate top_items.parquet from transactions")
-    parser.add_argument("--transactions", default=None, help="Path to transactions_train.csv")
-    parser.add_argument("--output", default=DEFAULT_OUTPUT_PATH, help="Output parquet path")
-    parser.add_argument("--topn", type=int, default=POPULARITY_CANDIDATE_TOPN, help="Number of top items to keep")
+    parser = argparse.ArgumentParser(
+        description="Generate top_items.parquet from transactions"
+    )
+    parser.add_argument(
+        "--transactions", default=None, help="Path to transactions_train.csv"
+    )
+    parser.add_argument(
+        "--output", default=DEFAULT_OUTPUT_PATH, help="Output parquet path"
+    )
+    parser.add_argument(
+        "--topn",
+        type=int,
+        default=POPULARITY_CANDIDATE_TOPN,
+        help="Number of top items to keep",
+    )
     args = parser.parse_args()
 
     tx_path = args.transactions

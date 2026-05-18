@@ -1,5 +1,6 @@
 import pytest
 import sys
+from types import ModuleType as _ModuleType
 from unittest.mock import MagicMock
 
 
@@ -65,8 +66,6 @@ sys.modules["opentelemetry.instrumentation.fastapi"] = MagicMock()
 # Pre-seed src.utils.observability so test files that use sys.modules.setdefault() during
 # collection (test_ingress_probe_recovery, test_ingress_request_errors) cannot replace it
 # with a stub where setup_tracing returns None — which would corrupt later test imports.
-from types import ModuleType as _ModuleType
-
 _observability_stub = _ModuleType("src.utils.observability")
 _observability_stub.setup_tracing = lambda *args, **kwargs: MagicMock()
 sys.modules["src.utils.observability"] = _observability_stub
@@ -74,8 +73,6 @@ sys.modules["src.utils.observability"] = _observability_stub
 # Pre-import deployment modules that test_multimodal_search.py stubs via setdefault().
 # Without these pre-imports, the stubs (with Deployment = object) would be installed
 # before the test files that need the real classes are collected, causing AttributeError.
-from src.deployments.popularity import PopularityDeployment as _PopularityDeployment  # noqa: F401, E402
-from src.deployments.router import RouterDeployment as _RouterDeployment  # noqa: F401, E402
 
 
 @pytest.fixture(autouse=True)

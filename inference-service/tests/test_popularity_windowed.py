@@ -23,7 +23,9 @@ from personalization.popularity_windows import (
 # wrote and silently falls through to global:popular with no visible error.
 # ---------------------------------------------------------------------------
 
-_CROSS_LANG_TS = 1_700_000_000  # 2023-11-14T22:13:20 UTC — shared with Java PopularityKeyFormulaTest
+_CROSS_LANG_TS = (
+    1_700_000_000  # 2023-11-14T22:13:20 UTC — shared with Java PopularityKeyFormulaTest
+)
 
 
 def test_materialized_key_24h_cross_language_contract():
@@ -55,9 +57,9 @@ def test_bucket_start_alignment_invariant():
     for window, bucket_secs in [("1h", 300), ("24h", 3600), ("7d", 86400)]:
         key = materialized_window_key(window, bucket_secs, now_ts=_CROSS_LANG_TS)
         bucket_start = int(key.rsplit(":", 1)[-1])
-        assert bucket_start % bucket_secs == 0, (
-            f"bucketStart {bucket_start} is not a multiple of bucket_seconds {bucket_secs}"
-        )
+        assert (
+            bucket_start % bucket_secs == 0
+        ), f"bucketStart {bucket_start} is not a multiple of bucket_seconds {bucket_secs}"
 
 
 def test_window_rollover_changes_materialized_key():

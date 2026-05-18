@@ -240,9 +240,7 @@ class BehaviorBoost:
 
         if category_affinity_boost is not None:
             self.category_affinity_boost = category_affinity_boost
-            logger.info(
-                f"Updated category_affinity_boost → {category_affinity_boost}"
-            )
+            logger.info(f"Updated category_affinity_boost → {category_affinity_boost}")
 
         if max_recent_clicks is not None:
             self.max_recent_clicks = max_recent_clicks

@@ -62,8 +62,18 @@ def test_article_id_is_zero_padded_to_ten():
 def test_validate_top_items_passes_valid_df():
     df = pd.DataFrame(
         [
-            {"article_id": "0000000001", "purchase_count": 10, "popularity_score": 1.0, "rank": 1},
-            {"article_id": "0000000002", "purchase_count": 5, "popularity_score": 0.5, "rank": 2},
+            {
+                "article_id": "0000000001",
+                "purchase_count": 10,
+                "popularity_score": 1.0,
+                "rank": 1,
+            },
+            {
+                "article_id": "0000000002",
+                "purchase_count": 5,
+                "popularity_score": 0.5,
+                "rank": 2,
+            },
         ]
     )
     validate_top_items(df)  # should not raise
@@ -71,7 +81,11 @@ def test_validate_top_items_passes_valid_df():
 
 def test_validate_top_items_raises_on_empty():
     with pytest.raises(ValueError, match="empty"):
-        validate_top_items(pd.DataFrame(columns=["article_id", "purchase_count", "popularity_score", "rank"]))
+        validate_top_items(
+            pd.DataFrame(
+                columns=["article_id", "purchase_count", "popularity_score", "rank"]
+            )
+        )
 
 
 def test_validate_top_items_raises_on_missing_column():
@@ -82,7 +96,14 @@ def test_validate_top_items_raises_on_missing_column():
 
 def test_validate_top_items_raises_on_zero_purchase_count():
     df = pd.DataFrame(
-        [{"article_id": "0000000001", "purchase_count": 0, "popularity_score": 0.0, "rank": 1}]
+        [
+            {
+                "article_id": "0000000001",
+                "purchase_count": 0,
+                "popularity_score": 0.0,
+                "rank": 1,
+            }
+        ]
     )
     with pytest.raises(ValueError, match="purchase_count"):
         validate_top_items(df)
@@ -91,8 +112,18 @@ def test_validate_top_items_raises_on_zero_purchase_count():
 def test_validate_top_items_raises_on_non_consecutive_ranks():
     df = pd.DataFrame(
         [
-            {"article_id": "0000000001", "purchase_count": 10, "popularity_score": 1.0, "rank": 1},
-            {"article_id": "0000000002", "purchase_count": 5, "popularity_score": 0.5, "rank": 3},
+            {
+                "article_id": "0000000001",
+                "purchase_count": 10,
+                "popularity_score": 1.0,
+                "rank": 1,
+            },
+            {
+                "article_id": "0000000002",
+                "purchase_count": 5,
+                "popularity_score": 0.5,
+                "rank": 3,
+            },
         ]
     )
     with pytest.raises(ValueError, match="ranks"):
