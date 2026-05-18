@@ -27,28 +27,30 @@ TRAIN_DATA_PARQUET_PATH = os.getenv(
 )
 
 TOP_ITEMS_PARQUET_PATH = os.getenv(
-    "TOP_ITEMS_PARQUET_PATH", str(PROCESSED_DATA_DIR / "top_items_parquet")
+    "TOP_ITEMS_PARQUET_PATH", str(PROCESSED_DATA_DIR / "top_items.parquet")
 )
 
 ARTICLE_EMBEDDINGS_PATH = os.getenv(
     "ARTICLE_EMBEDDINGS_PATH",
-    str(BASE_DIR / "data" / "article_embeddings_bge_detail.parquet"),
+    str(BASE_DIR / "data" / "processed" / "article_embeddings_bge_small_v1_5_detail.parquet"),
 )
 
-# Embedding configuration
-EMBEDDING_COL = os.getenv("EMBEDDING_COL", "embedding")
+# Canonical embedding column name — must match generate_embeddings.py and bootstrap_data.py
+EMBEDDING_COL = os.getenv("EMBEDDING_COL", "bge_embedding")
 
 # Milvus configuration
 MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
 MILVUS_PORT = os.getenv("MILVUS_PORT", "19530")
-MILVUS_COLLECTION = os.getenv("MILVUS_COLLECTION", "scale_style_bge_v2")
+MILVUS_COLLECTION = os.getenv("MILVUS_COLLECTION", "scale_style_bge_small_v1_5")
 
 # Redis configuration
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_TLS = os.getenv("REDIS_TLS", "false").lower() in ("1", "true", "yes")
 POPULARITY_KEY = os.getenv("POPULARITY_KEY", "global:popular")
-POPULARITY_TOPN = int(os.getenv("POPULARITY_TOPN", "200"))
+# Candidate pool size stored in Redis — the API still returns only k items per request.
+# 1000 items provides a buffer for metadata-miss tolerance without unbounded memory use.
+POPULARITY_CANDIDATE_TOPN = int(os.getenv("POPULARITY_CANDIDATE_TOPN", "1000"))
 
 # Price configuration
 MIN_PRICE = float(os.getenv("MIN_PRICE", "19.99"))
