@@ -158,7 +158,7 @@ test_c2_milvus_consistency() {
         
         {
             echo "### Collection Info"
-            echo "- Collection: scale_style_bge_v2"
+            echo "- Collection: scale_style_bge_small_v1_5"
             echo "- Exists: ✅ Yes (verified via search functionality)"
             echo "- Row Count: $row_count"
         } >> "$RESULT_FILE"
@@ -178,7 +178,7 @@ test_c2_milvus_consistency() {
         log_error "✗ Milvus collection not accessible"
         {
             echo "### Collection Info"
-            echo "- Collection: scale_style_bge_v2"
+            echo "- Collection: scale_style_bge_small_v1_5"
             echo "- Exists: ❌ No or not accessible"
             echo "- Error: $milvus_result"
         } >> "$RESULT_FILE"

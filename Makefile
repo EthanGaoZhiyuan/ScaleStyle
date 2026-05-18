@@ -2,10 +2,16 @@
 # Production K8s deployment
 
 .PHONY: help k8s-setup k8s-apply k8s-delete k8s-status k8s-logs-gateway k8s-logs-inference \
+	generate-embeddings-smoke generate-embeddings-full validate-embeddings bootstrap-local-data \
+	generate-image-embeddings-smoke generate-image-embeddings-full \
+	validate-image-embeddings validate-image-embeddings-smoke \
+	bootstrap-image-collection rebuild-image-collection \
+	bootstrap-smoke-image-collection image-pipeline-smoke \
 	milvus-install milvus-uninstall data-init build-images push-images deploy-all clean-all \
 	tf-init tf-plan tf-apply tf-destroy eks-kubeconfig kafka-install-strimzi kafka-deploy \
 	kafka-status kafka-topic-verify kafka-smoke eks-sync-ecr-images bootstrap-kafka \
-	apply-cloud-config install-alb-controller deploy-milvus deploy-production destroy-production verify-deployment push-ecr-images
+	apply-cloud-config install-alb-controller deploy-milvus deploy-production destroy-production verify-deployment push-ecr-images \
+	smoke-text smoke-image smoke-hybrid smoke-fallback smoke-all
 
 # Default Docker Hub username (override with: make deploy-all DOCKERHUB_USER=yourname)
 DOCKERHUB_USER ?= your-dockerhub-username
@@ -154,6 +160,99 @@ milvus-uninstall: ## Uninstall Milvus
 	@helm uninstall milvus --namespace $(NAMESPACE) || true
 	@echo "$(GREEN)✓ Milvus uninstalled$(NC)"
 
+##@ Data Pipeline (Embedding Generation + Bootstrap)
+
+PIPELINE_DIR := data-pipeline
+EMBEDDING_OUTPUT := $(PIPELINE_DIR)/data/processed/article_embeddings_bge_small_v1_5_detail.parquet
+
+generate-embeddings-smoke: ## Smoke test: embed first 100 articles (no GPU required)
+	@echo "$(GREEN)Running embedding smoke test (100 articles)…$(NC)"
+	cd $(PIPELINE_DIR) && python src/generate_embeddings.py --limit 100 --overwrite
+	@echo "$(GREEN)✓ Smoke generation complete$(NC)"
+
+generate-embeddings-full: ## Full embedding generation (~105K articles) — runs in data-pipeline/
+	@echo "$(YELLOW)Full embedding generation. This may take 15–30 min on CPU.$(NC)"
+	cd $(PIPELINE_DIR) && python src/generate_embeddings.py --overwrite
+
+validate-embeddings: ## Validate the active embedding parquet artifact
+	@echo "$(GREEN)Validating embedding parquet…$(NC)"
+	cd $(PIPELINE_DIR) && python src/validate_embeddings.py \
+		--input data/processed/article_embeddings_bge_small_v1_5_detail.parquet \
+		--expected-dim 384
+
+bootstrap-local-data: ## Load embedding parquet into local Milvus + Redis (docker-compose must be up)
+	@echo "$(GREEN)Bootstrapping local Milvus + Redis…$(NC)"
+	cd $(PIPELINE_DIR) && python src/bootstrap_data.py \
+		--parquet data/processed/article_embeddings_bge_small_v1_5_detail.parquet \
+		--drop-existing
+	@echo "$(GREEN)✓ Local bootstrap complete$(NC)"
+
+# Image embedding pipeline variables (openai/clip-vit-base-patch32, 512-d)
+# Full artifact — written only by generate-image-embeddings-full, read by validate/bootstrap targets
+IMAGE_EMBEDDING_PARQUET       := data/processed/article_image_embeddings_clip_vit_base_patch32.parquet
+IMAGE_COLLECTION              := scale_style_clip_image_v1
+IMAGE_EMBEDDING_DIM           := 512
+# Smoke artifact — written only by generate-image-embeddings-smoke; never overwrites the full artifact
+IMAGE_EMBEDDING_SMOKE_PARQUET := data/processed/smoke/article_image_embeddings_clip_vit_base_patch32_smoke.parquet
+IMAGE_SMOKE_COLLECTION        := scale_style_clip_image_smoke_v1
+
+generate-image-embeddings-smoke: ## Smoke test: generate image embeddings for 100 articles → data/processed/smoke/ (never touches full artifact)
+	@echo "$(GREEN)Running image embedding smoke test (100 articles)…$(NC)"
+	@echo "$(YELLOW)  output: $(IMAGE_EMBEDDING_SMOKE_PARQUET)$(NC)"
+	cd $(PIPELINE_DIR) && python src/generate_image_embeddings.py \
+		--output $(IMAGE_EMBEDDING_SMOKE_PARQUET) \
+		--limit 100 \
+		--overwrite
+	@echo "$(GREEN)✓ Image embedding smoke complete$(NC)"
+
+generate-image-embeddings-full: ## Full image embedding generation (~105K images) — WARNING: 20–60+ min on CPU; writes $(IMAGE_EMBEDDING_PARQUET)
+	@echo "$(RED)WARNING: This writes the FULL artifact and may take 20–60+ minutes on CPU.$(NC)"
+	@echo "$(RED)         Output: $(IMAGE_EMBEDDING_PARQUET)$(NC)"
+	@echo "$(YELLOW)         Press Ctrl+C to cancel.$(NC)"
+	cd $(PIPELINE_DIR) && python src/generate_image_embeddings.py \
+		--output $(IMAGE_EMBEDDING_PARQUET) \
+		--overwrite
+
+validate-image-embeddings: ## Validate the FULL image embedding artifact (expected dim: 512)
+	@echo "$(GREEN)Validating full image embedding parquet…$(NC)"
+	cd $(PIPELINE_DIR) && python src/validate_image_embeddings.py \
+		--input $(IMAGE_EMBEDDING_PARQUET) \
+		--expected-dim $(IMAGE_EMBEDDING_DIM)
+
+validate-image-embeddings-smoke: ## Validate the SMOKE image embedding artifact (expected dim: 512)
+	@echo "$(GREEN)Validating smoke image embedding parquet…$(NC)"
+	cd $(PIPELINE_DIR) && python src/validate_image_embeddings.py \
+		--input $(IMAGE_EMBEDDING_SMOKE_PARQUET) \
+		--expected-dim $(IMAGE_EMBEDDING_DIM)
+
+bootstrap-image-collection: ## Bootstrap FULL image Milvus collection (safe: fails if collection exists — see rebuild-image-collection)
+	@echo "$(GREEN)Bootstrapping Milvus image collection: $(IMAGE_COLLECTION)…$(NC)"
+	cd $(PIPELINE_DIR) && python src/bootstrap_image_collection.py \
+		--parquet $(IMAGE_EMBEDDING_PARQUET) \
+		--collection $(IMAGE_COLLECTION) \
+		--expected-dim $(IMAGE_EMBEDDING_DIM)
+	@echo "$(GREEN)✓ Image collection bootstrap complete$(NC)"
+
+rebuild-image-collection: ## Drop and rebuild FULL image Milvus collection — WARNING: destroys existing vectors
+	@echo "$(RED)WARNING: Dropping and rebuilding collection '$(IMAGE_COLLECTION)'. All existing vectors will be lost.$(NC)"
+	cd $(PIPELINE_DIR) && python src/bootstrap_image_collection.py \
+		--parquet $(IMAGE_EMBEDDING_PARQUET) \
+		--collection $(IMAGE_COLLECTION) \
+		--expected-dim $(IMAGE_EMBEDDING_DIM) \
+		--drop-existing
+	@echo "$(GREEN)✓ Image collection rebuilt$(NC)"
+
+bootstrap-smoke-image-collection: ## Bootstrap SMOKE image Milvus collection from smoke artifact (100 items, separate collection)
+	@echo "$(GREEN)Bootstrapping smoke Milvus image collection: $(IMAGE_SMOKE_COLLECTION)…$(NC)"
+	cd $(PIPELINE_DIR) && python src/bootstrap_image_collection.py \
+		--parquet $(IMAGE_EMBEDDING_SMOKE_PARQUET) \
+		--collection $(IMAGE_SMOKE_COLLECTION) \
+		--expected-dim $(IMAGE_EMBEDDING_DIM) \
+		--drop-existing
+	@echo "$(GREEN)✓ Smoke image collection bootstrap complete$(NC)"
+
+image-pipeline-smoke: generate-image-embeddings-smoke validate-image-embeddings-smoke bootstrap-smoke-image-collection ## Smoke pipeline: generate (100 items) → validate → load into smoke collection (never touches full artifact or full collection)
+
 ##@ Data Initialization
 
 data-init: ## Run data initialization job
@@ -248,3 +347,20 @@ port-forward-gateway: ## Port-forward gateway to localhost:8080
 port-forward-inference: ## Port-forward inference to localhost:8000
 	@echo "$(GREEN)Port-forwarding inference to localhost:8000$(NC)"
 	@kubectl port-forward -n $(NAMESPACE) svc/inference 8000:8000
+
+##@ Local Smoke Tests (docker-compose)
+
+smoke-text: ## Text search smoke test (GET /api/recommendation/search)
+	@bash scripts/smoke_text_search.sh
+
+smoke-image: ## Image search smoke test (POST /api/recommendation/search/image)
+	@bash scripts/smoke_image_search.sh
+
+smoke-hybrid: ## Hybrid text+image search smoke test (POST /api/recommendation/search/hybrid)
+	@bash scripts/smoke_hybrid_search.sh
+
+smoke-fallback: ## Fallback resilience smoke test (non-destructive by default; DESTRUCTIVE=1 pauses inference)
+	@bash scripts/smoke_fallback.sh
+
+smoke-all: ## Run all non-destructive smoke tests
+	@bash scripts/smoke_all.sh

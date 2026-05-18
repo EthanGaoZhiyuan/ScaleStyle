@@ -307,7 +307,7 @@ test_a3_dependency_health() {
                 echo "### Milvus"
                 echo "- Status: ✅ Healthy"
                 echo "- Pod: Running"
-                echo "- Collection: scale_style_bge_v2"
+                echo "- Collection: scale_style_bge_small_v1_5"
                 echo "- Row Count: $row_count"
                 echo ""
             } >> "$RESULT_FILE"

@@ -316,7 +316,7 @@ milvus_get_pod() {
 
 # Check Milvus collection health via kubectl exec
 milvus_check_collection() {
-    local collection_name="${1:-scale_style_bge_v2}"
+    local collection_name="${1:-scale_style_bge_small_v1_5}"
     local namespace="${MILVUS_NAMESPACE:-scalestyle}"
     local pod_name=$(milvus_get_pod)
     
