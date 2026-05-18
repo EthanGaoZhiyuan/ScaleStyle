@@ -56,19 +56,20 @@ if CONSUMER_MODE not in {"primary", "retry"}:
         f"Mixed-mode consumption ('both') is not supported for production safety."
     )
 
-# Consumer Group ID
-# Automatically derived based on mode to ensure isolation:
-# - primary mode: "{base_group_id}-primary"
-# - retry mode: "{base_group_id}-retry"
-KAFKA_GROUP_ID_BASE = os.getenv("KAFKA_GROUP_ID", "event-consumer")
-
-if CONSUMER_MODE == "primary":
-    KAFKA_GROUP_ID = f"{KAFKA_GROUP_ID_BASE}-primary"
-elif CONSUMER_MODE == "retry":
-    KAFKA_GROUP_ID = f"{KAFKA_GROUP_ID_BASE}-retry"
+# Consumer Group ID — must be distinct per consumer role.
+# Set KAFKA_GROUP_ID explicitly in each deployment environment.
+# Defaults when not set:
+#   primary mode → scalestyle-click-main
+#   retry mode   → scalestyle-click-retry
+# No suffix is appended automatically; the value used is the exact group ID
+# passed to KafkaConsumer.
+_kafka_group_id_env = os.getenv("KAFKA_GROUP_ID")
+if _kafka_group_id_env:
+    KAFKA_GROUP_ID = _kafka_group_id_env
+elif CONSUMER_MODE == "primary":
+    KAFKA_GROUP_ID = "scalestyle-click-main"
 else:
-    # Should never reach here due to validation above
-    raise RuntimeError(f"Invalid CONSUMER_MODE: {CONSUMER_MODE}")
+    KAFKA_GROUP_ID = "scalestyle-click-retry"
 
 # Redis Configuration
 # Resource limits match inference service standards (L4 Top / P50 guard)
