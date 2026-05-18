@@ -53,42 +53,46 @@ class RedisClient:
                         #
                         # Timeout rationale
                         # -----------------
-                        # socket_connect_timeout=0.02 (20 ms): TCP handshake budget.  A new
-                        #   connection that takes longer than this is already outside the p99
-                        #   window; fail fast and let the caller degrade gracefully.
-                        # socket_timeout=0.01 (10 ms): per-command read/write budget.
-                        #   Matches the p99 < 10 ms personalization-read SLO.  Any Redis op
-                        #   that exceeds this raises redis.TimeoutError immediately — the
-                        #   caller (FeatureReader) catches it and returns an empty fallback.
+                        # socket_connect_timeout (150 ms default): TCP handshake budget.
+                        #   10 ms was correct for localhost but too tight for Docker bridge
+                        #   (~1–5 ms round-trip) or ElastiCache (~0.5–3 ms + spikes).
+                        #   150 ms gives ample room for transient network jitter without
+                        #   hanging the event loop.
+                        # socket_timeout (150 ms default): per-command read/write deadline.
+                        #   The application-level guard (PERSONALIZATION_TIMEOUT_MS=50 ms
+                        #   asyncio.wait_for) fires first on the hot path; this is the
+                        #   socket-level last resort for commands that don't go through
+                        #   wait_for (e.g. startup ping, enrich pipeline).
+                        # Both values are configurable via REDIS_CONNECT_TIMEOUT_MS and
+                        # REDIS_SOCKET_TIMEOUT_MS environment variables (see RedisConfig).
                         #
                         # NO automatic retry (retry_on_timeout=False, no retry_on_error)
                         # ---------------------------------------------------------------
-                        # Retrying on the hot path would silently double (or triple) the
-                        # tail latency: a 10 ms timeout that retries twice becomes 30 ms+
-                        # before the business layer even sees the failure.  Degradation
-                        # (empty features → popularity fallback) is cheaper and predictable.
-                        # Retry logic belongs in the event-consumer's offline write path,
-                        # not here.
-                        pool = redis.ConnectionPool(
+                        # Retrying on the hot path would silently multiply tail latency.
+                        # Degradation (empty features → popularity fallback) is cheaper
+                        # and predictable.  Retry logic belongs in the event-consumer.
+                        pool_kwargs = dict(
                             host=RedisConfig.HOST,
                             port=RedisConfig.PORT,
                             decode_responses=True,
-                            socket_connect_timeout=0.02,  # 20 ms — fail-fast on new connections
-                            socket_timeout=0.01,  # 10 ms — matches p99 personalization SLO
+                            socket_connect_timeout=RedisConfig.SOCKET_CONNECT_TIMEOUT_SEC,
+                            socket_timeout=RedisConfig.SOCKET_TIMEOUT_SEC,
                             max_connections=128,  # support concurrent Ray Serve replicas
                             health_check_interval=30,  # keep idle connections alive
                             retry_on_timeout=False,  # NO implicit retry — see note above
-                            ssl=RedisConfig.TLS,
-                            ssl_cert_reqs="required" if RedisConfig.TLS else None,
                         )
+                        # redis-py 7.x dropped ssl=False as a valid kwarg; only
+                        # pass TLS params when TLS is actually required.
+                        if RedisConfig.TLS:
+                            pool_kwargs["ssl"] = True
+                            pool_kwargs["ssl_cert_reqs"] = "required"
+                        pool = redis.ConnectionPool(**pool_kwargs)
 
                         cls._client = redis.Redis(connection_pool=pool)
-                        logger.info("✅ Redis connection pool initialized successfully")
+                        logger.info("Redis connection pool initialized successfully")
 
                     except Exception as e:
-                        logger.error(
-                            "❌ Failed to connect to Redis: %s", e, exc_info=True
-                        )
+                        logger.error("Failed to connect to Redis: %s", e, exc_info=True)
                         raise
 
         return cls._client

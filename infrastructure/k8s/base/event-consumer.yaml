@@ -64,6 +64,10 @@ spec:
         env:
         - name: CONSUMER_MODE
           value: "primary"
+        # Per-deployment group ID — takes precedence over configmap and scalestyle-cloud-config.
+        # Must be distinct from the retry consumer group to prevent partition-assignment collision.
+        - name: KAFKA_GROUP_ID
+          value: "scalestyle-click-main"
         # Override the shared configmap value (5s) with a consumer-safe timeout.
         # The consumer poll loop processes up to KAFKA_POLL_MAX_RECORDS messages per
         # batch; a 5s Redis timeout per call × 100 messages = 500s >> Kafka's

@@ -83,7 +83,7 @@ def test_popularity_topk_prefers_primary_window_and_falls_back_to_secondary(
     ]
 
     monkeypatch.setattr(
-        "src.deployments.popularity.RedisClient.get_client", lambda: redis_client
+        "src.utils.redis_client.RedisClient.get_client", lambda: redis_client
     )
 
     deployment = PopularityDeployment()
@@ -106,7 +106,7 @@ def test_materialized_window_rebuild_uses_short_redis_lease(monkeypatch):
     redis_client._pipeline_results = [None]
 
     monkeypatch.setattr(
-        "src.deployments.popularity.RedisClient.get_client", lambda: redis_client
+        "src.utils.redis_client.RedisClient.get_client", lambda: redis_client
     )
 
     deployment = PopularityDeployment()
@@ -121,7 +121,7 @@ def test_materialized_window_skips_duplicate_rebuild_when_peer_holds_lease(monke
     redis_client.set_results = [False]
 
     monkeypatch.setattr(
-        "src.deployments.popularity.RedisClient.get_client", lambda: redis_client
+        "src.utils.redis_client.RedisClient.get_client", lambda: redis_client
     )
 
     deployment = PopularityDeployment()

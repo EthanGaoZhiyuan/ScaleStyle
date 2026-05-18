@@ -4,11 +4,62 @@ from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from personalization.feature_reader_legacy import LegacyFeatureReader
+from personalization.legacy.feature_reader_legacy import LegacyFeatureReader
 from personalization.popularity_windows import (
     active_bucket_keys,
     materialized_window_key,
 )
+
+# ---------------------------------------------------------------------------
+# Cross-language contract: same timestamp → same key as Java PopularityKeyFormulaTest
+#
+# Fixed anchor: 1_700_000_000 Unix seconds (2023-11-14T22:13:20 UTC)
+# Java equivalents in gateway-service/src/test/.../PopularityKeyFormulaTest.java:
+#   popularityMaterializedKey(PREFIX, "24h", 1_700_000_000L, 3600L) == "popularity:materialized:24h:1699999200"
+#   popularityMaterializedKey(PREFIX, "7d",  1_700_000_000L, 86400L) == "popularity:materialized:7d:1699920000"
+#   popularityMaterializedKey(PREFIX, "1h",  1_700_000_000L, 300L)   == "popularity:materialized:1h:1699999800"
+#
+# If either side's expected string changes, the gateway reads a different ZSET than inference
+# wrote and silently falls through to global:popular with no visible error.
+# ---------------------------------------------------------------------------
+
+_CROSS_LANG_TS = (
+    1_700_000_000  # 2023-11-14T22:13:20 UTC — shared with Java PopularityKeyFormulaTest
+)
+
+
+def test_materialized_key_24h_cross_language_contract():
+    """Java PopularityKeyFormulaTest.key_24h_knownTimestamp asserts the same expected string."""
+    assert (
+        materialized_window_key("24h", 3600, now_ts=_CROSS_LANG_TS)
+        == "popularity:materialized:24h:1699999200"
+    )
+
+
+def test_materialized_key_7d_cross_language_contract():
+    """Java PopularityKeyFormulaTest.key_7d_knownTimestamp asserts the same expected string."""
+    assert (
+        materialized_window_key("7d", 86400, now_ts=_CROSS_LANG_TS)
+        == "popularity:materialized:7d:1699920000"
+    )
+
+
+def test_materialized_key_1h_cross_language_contract():
+    """Java PopularityKeyFormulaTest.key_1h_knownTimestamp asserts the same expected string."""
+    assert (
+        materialized_window_key("1h", 300, now_ts=_CROSS_LANG_TS)
+        == "popularity:materialized:1h:1699999800"
+    )
+
+
+def test_bucket_start_alignment_invariant():
+    """bucketStart % bucket_seconds == 0 for all standard window sizes."""
+    for window, bucket_secs in [("1h", 300), ("24h", 3600), ("7d", 86400)]:
+        key = materialized_window_key(window, bucket_secs, now_ts=_CROSS_LANG_TS)
+        bucket_start = int(key.rsplit(":", 1)[-1])
+        assert (
+            bucket_start % bucket_secs == 0
+        ), f"bucketStart {bucket_start} is not a multiple of bucket_seconds {bucket_secs}"
 
 
 def test_window_rollover_changes_materialized_key():

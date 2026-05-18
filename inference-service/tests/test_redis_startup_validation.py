@@ -87,10 +87,15 @@ def test_server_boot_validates_redis_before_starting_ray(monkeypatch):
     monkeypatch.setattr(
         "ray.serve.run", lambda *args, **kwargs: serve_run_calls.append((args, kwargs))
     )
+    # server.py has a `while True: time.sleep(60)` keep-alive loop at module level.
+    # Raise SystemExit on the first sleep to break out of it without hanging.
+    monkeypatch.setattr("time.sleep", lambda _: (_ for _ in ()).throw(SystemExit(0)))
 
     sys.modules.pop("src.server", None)
     try:
         importlib.import_module("src.server")
+    except SystemExit:
+        pass
     finally:
         sys.modules.pop("src.server", None)
         for module_name, original_module in original_modules.items():

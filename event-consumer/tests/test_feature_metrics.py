@@ -23,7 +23,9 @@ def consumer_ctx():
         "consumer.KafkaProducer"
     ) as mock_kafka_producer_cls, patch(
         "consumer.metrics"
-    ) as mock_metrics:
+    ) as mock_metrics, patch(
+        "feature_update_handler.metrics"
+    ) as fuh_metrics:
 
         redis_client = Mock()
         redis_client.ping.return_value = True
@@ -42,8 +44,9 @@ def consumer_ctx():
         metrics_server = Mock()
         mock_metrics_server_cls.return_value = metrics_server
 
-        # Mock all prometheus metrics
-        for attr in [
+        # Configure metric mocks for both the consumer module and feature_update_handler
+        # module (FeatureUpdateHandler uses its own metrics import).
+        _metric_attrs = [
             "events_processed_total",
             "events_failed_total",
             "events_duplicate_total",
@@ -52,12 +55,22 @@ def consumer_ctx():
             "redis_operations_total",
             "event_processing_latency_seconds",
             "redis_update_latency_seconds",
-        ]:
+            "category_cache_ops_total",
+            "category_cache_size",
+        ]
+        for attr in _metric_attrs:
             metric_mock = MagicMock()
             metric_mock.labels.return_value = metric_mock
             metric_mock.inc.return_value = None
             metric_mock.observe.return_value = None
+            metric_mock.set.return_value = None
             setattr(mock_metrics, attr, metric_mock)
+            setattr(fuh_metrics, attr, metric_mock)  # same mock object for both
+
+        for fn_name in ("record_redis_success", "record_redis_error"):
+            fn_mock = Mock()
+            setattr(mock_metrics, fn_name, fn_mock)
+            setattr(fuh_metrics, fn_name, fn_mock)
 
         consumer = EventConsumer()
         consumer.redis_client = redis_client

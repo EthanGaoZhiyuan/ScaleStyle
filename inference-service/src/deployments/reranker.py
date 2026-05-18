@@ -106,10 +106,10 @@ def _stub_score(query: str, doc: str) -> float:
 
 
 @serve.deployment(
-    # v2.3 optimization: max_ongoing_requests=6 avoids CPU/thread contention
-    # Balances concurrency with Torch thread competition on local CPU inference
+    # Default 6 avoids CPU/thread contention from Torch cross-encoder parallelism.
+    # Overridable via RERANKER_MAX_ONGOING_REQUESTS env var.
     ray_actor_options={"num_cpus": 0.25},
-    max_ongoing_requests=6,
+    max_ongoing_requests=int(os.getenv("RERANKER_MAX_ONGOING_REQUESTS", "6")),
 )
 class RerankerDeployment:
     """
@@ -202,12 +202,12 @@ class RerankerDeployment:
             )
             if self.device == "cpu":
                 logger.warning(
-                    "⚠️  Running CrossEncoder on CPU. Latency may be high. Consider using GPU or a smaller model (MiniLM)."
+                    "Running CrossEncoder on CPU. Latency may be high. Consider using GPU or a smaller model (MiniLM)."
                 )
 
         except Exception as e:
             logger.error(
-                f"❌ Failed to load reranker model '{self.model_name}': {e}\n"
+                f"Failed to load reranker model '{self.model_name}': {e}\n"
                 f"   Falling back to stub scoring model.\n"
                 f"   Possible causes:\n"
                 f"   - Network connectivity issues\n"
@@ -223,9 +223,9 @@ class RerankerDeployment:
             try:
                 t0 = time.time()
                 _ = self._model.predict([("warmup query", "warmup doc")])
-                logger.info("✅ Reranker warmup ok %.1fms", (time.time() - t0) * 1000)
+                logger.info("Reranker warmup ok %.1fms", (time.time() - t0) * 1000)
             except Exception as e:
-                logger.warning("⚠️  Reranker warmup failed: %s", e)
+                logger.warning("Reranker warmup failed: %s", e)
 
     def is_enabled(self) -> bool:
         """

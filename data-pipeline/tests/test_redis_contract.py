@@ -76,5 +76,44 @@ def test_load_redis_data_writes_canonical_item_and_meta_keys(monkeypatch):
     assert fake_redis.pipeline_instance.hset_calls[0][1]["article_id"] == "0000123456"
     assert fake_redis.pipeline_instance.hset_calls[0][1]["prod_name"] == "Green Jacket"
     assert fake_redis.pipeline_instance.hset_calls[0][1]["category"] == "outerwear"
-    assert fake_redis.zadd_calls[0][0] == bootstrap_data.POPULARITY_KEY
-    assert "0000123456" in fake_redis.zadd_calls[0][1]
+    # load_redis_data no longer writes global:popular — popularity is managed separately
+    assert fake_redis.zadd_calls == []
+
+
+def test_load_popularity_writes_purchase_counts_as_zset_scores(monkeypatch):
+    fake_redis = _FakeRedis()
+    monkeypatch.setattr(bootstrap_data.redis, "Redis", lambda **kwargs: fake_redis)
+
+    top_items = pd.DataFrame(
+        [
+            {
+                "article_id": "0000111111",
+                "purchase_count": 500,
+                "popularity_score": 1.0,
+                "rank": 1,
+            },
+            {
+                "article_id": "0000222222",
+                "purchase_count": 300,
+                "popularity_score": 0.6,
+                "rank": 2,
+            },
+            {
+                "article_id": "0000333333",
+                "purchase_count": 100,
+                "popularity_score": 0.2,
+                "rank": 3,
+            },
+        ]
+    )
+
+    bootstrap_data.load_popularity(top_items)
+
+    assert bootstrap_data.POPULARITY_KEY in fake_redis.deleted_keys
+    assert len(fake_redis.zadd_calls) == 1
+    mapping = fake_redis.zadd_calls[0][1]
+    assert mapping["0000111111"] == 500
+    assert mapping["0000222222"] == 300
+    assert mapping["0000333333"] == 100
+    # Rank 1 must have the highest score
+    assert mapping["0000111111"] > mapping["0000222222"] > mapping["0000333333"]

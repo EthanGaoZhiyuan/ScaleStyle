@@ -1,0 +1,14 @@
+# Lightweight deps for CI unit tests.
+# Excludes: pyspark, ray, boto3/s3fs/smart_open (integration/ETL-only deps).
+# torch: install separately with --index-url https://download.pytorch.org/whl/cpu
+#         before installing this file to get the CPU-only wheel (~400 MB vs ~2 GB GPU wheel).
+
+pandas==2.3.3
+numpy==2.2.6
+pyarrow==22.0.0
+pytest==9.0.2
+redis==7.1.0
+pymilvus==2.6.6
+tqdm==4.67.1
+Pillow>=9.0.0
+transformers>=4.40.0

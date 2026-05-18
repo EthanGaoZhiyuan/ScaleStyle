@@ -196,13 +196,16 @@ public class ProductCacheService {
             log.debug("Building from hash for {}: prod_name='{}', hash keys={}",
                     articleId, name, hash.keySet());
 
+            String rawImgUrl = getHashValue(hash, "image_url", "");
+            String imgUrl = rawImgUrl.isEmpty() ? localImagePath(articleId) : rawImgUrl;
+
             return Optional.of(RecommendationDTO.builder()
                     .itemId(articleId)
                     .name(name)
                     .category(getHashValue(hash, "department_name", ""))
                     .description(getHashValue(hash, "detail_desc", ""))
                     .price(parsePrice(getHashValue(hash, "price", "0")))
-                    .imgUrl(getHashValue(hash, "image_url", ""))
+                    .imgUrl(imgUrl)
                     .build());
         } catch (Exception e) {
             log.warn("Failed to deserialise product hash: article_id={} error={}", articleId, e.getMessage());
@@ -216,6 +219,12 @@ public class ProductCacheService {
     private String getHashValue(Map<Object, Object> hash, String key, String defaultValue) {
         Object value = hash.get(key);
         return value != null ? value.toString() : defaultValue;
+    }
+
+    /** Deterministic local image path matching the static-file layout: /static/images/{folder}/{aid}.jpg */
+    private String localImagePath(String articleId) {
+        if (articleId == null || articleId.length() < 3) return "";
+        return "/static/images/" + articleId.substring(0, 3) + "/" + articleId + ".jpg";
     }
     
     /**

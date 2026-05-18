@@ -1,7 +1,17 @@
+"""
+Offline training feature engineering pipeline; not required for online serving bootstrap.
+
+Computes static features (customer demographics, article attributes, transaction aggregates)
+and generates negative samples for training ranking models.  This module uses PySpark
+and is meant to run as a batch job — it is NOT part of the online serving bootstrap
+path (generate_embeddings → bootstrap_data → Milvus/Redis).
+
+Do not import this module from bootstrap_data.py or any serving-path code.
+"""
+
 # ==============================================================================
 # FEATURE ENGINEERING MODULE (STATIC FEATURES)
 # ------------------------------------------------------------------------------
-# Assisted by: Google Gemini (AI) for PySpark syntax and production hardening.
 # Core Data Science Logic Source:
 #   - Kaggle Notebook: 'Part 1 - EDA, Data Cleaning & Feature Engineering' (by palash97)
 #   - Kaggle Notebook: 'Recommend Items Purchased Together' (by cdeotte)

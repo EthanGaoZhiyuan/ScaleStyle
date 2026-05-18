@@ -205,7 +205,7 @@ class BehaviorBoost:
         )
 
         logger.debug(
-            f"🎯 Behavior boost applied: {boosted_items} items, "
+            f"Behavior boost applied: {boosted_items} items, "
             f"exact={exact_boost_count}, category={category_boost_count}, popularity={popularity_boost_count}, "
             f"avg_factor={avg_boost_factor:.2f}"
         )
@@ -236,18 +236,16 @@ class BehaviorBoost:
         """
         if exact_click_boost is not None:
             self.exact_click_boost = exact_click_boost
-            logger.info(f"✅ Updated exact_click_boost → {exact_click_boost}")
+            logger.info(f"Updated exact_click_boost → {exact_click_boost}")
 
         if category_affinity_boost is not None:
             self.category_affinity_boost = category_affinity_boost
-            logger.info(
-                f"✅ Updated category_affinity_boost → {category_affinity_boost}"
-            )
+            logger.info(f"Updated category_affinity_boost → {category_affinity_boost}")
 
         if max_recent_clicks is not None:
             self.max_recent_clicks = max_recent_clicks
-            logger.info(f"✅ Updated max_recent_clicks → {max_recent_clicks}")
+            logger.info(f"Updated max_recent_clicks → {max_recent_clicks}")
 
         if max_boost_cap is not None:
             self.max_boost_cap = max_boost_cap
-            logger.info(f"✅ Updated max_boost_cap → {max_boost_cap}")
+            logger.info(f"Updated max_boost_cap → {max_boost_cap}")

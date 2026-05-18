@@ -40,11 +40,16 @@ public class ImageSearchRequest {
     @Schema(description = "Image URL for image-to-image search")
     @JsonProperty("image_url")
     private String imageUrl;
-    
+
     @Size(max = 100, message = "image_hash must not exceed 100 characters")
     @Schema(description = "Image hash for image-to-image search")
     @JsonProperty("image_hash")
     private String imageHash;
+
+    @Size(max = 5_000_000, message = "image_base64 must not exceed 5 MB encoded")
+    @Schema(description = "Base64-encoded image bytes for image-to-image search (SSRF-safe alternative to image_url)")
+    @JsonProperty("image_base64")
+    private String imageBase64;
     
     @Min(value = 1, message = "k must be at least 1")
     @Max(value = 100, message = "k must not exceed 100")

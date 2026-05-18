@@ -1,5 +1,8 @@
 import os
 import logging
+import signal
+import sys
+import time
 from src.utils.metrics import bootstrap_metrics_storage
 
 bootstrap_metrics_storage(clear_existing=True)
@@ -20,7 +23,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("scalestyle.server")
 
 # Feature flag: Enable vision deployment (requires transformers + pymilvus)
-VISION_ENABLED = os.getenv("VISION_ENABLED", "1").lower() in ("1", "true", "yes")
+VISION_ENABLED = os.getenv("VISION_ENABLED", "0").lower() in ("1", "true", "yes")
+
+# Feature flag: Enable generation deployment (Qwen2 LLM for recommendation explanations)
+GENERATION_ENABLED = os.getenv("GENERATION_ENABLED", "0").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 if VISION_ENABLED:
     try:
@@ -51,14 +61,10 @@ validate_startup_connection()
 
 ray.init(
     ignore_reinit_error=True,
-    resources={
-        "memory": int(RAY_MEMORY_GB * 1024 * 1024 * 1024)
-    },  # Heap memory (Ray 2.x+ API)
-    object_store_memory=int(
-        RAY_OBJECT_STORE_GB * 1024 * 1024 * 1024
-    ),  # Plasma store (allocated at startup)
+    _memory=int(RAY_MEMORY_GB * 1024 * 1024 * 1024),  # heap budget (Ray 2.x built-in)
+    object_store_memory=int(RAY_OBJECT_STORE_GB * 1024 * 1024 * 1024),
 )
-serve.start(detached=True)
+serve.start(detached=True, http_options={"host": "0.0.0.0", "port": 8000})
 
 # Deploy core services
 router_handle = RouterDeployment.bind()
@@ -66,7 +72,7 @@ embedding_handle = EmbeddingDeployment.bind()
 retrieval_handle = RetrievalDeployment.bind()
 popularity_handle = PopularityDeployment.bind()
 reranker_handle = RerankerDeployment.bind()
-generation_handle = GenerationDeployment.bind()
+generation_handle = GenerationDeployment.bind() if GENERATION_ENABLED else None
 
 # Conditionally deploy vision service
 vision_handle = VisionDeployment.bind() if VISION_ENABLED else None
@@ -86,7 +92,25 @@ ingress = IngressDeployment.bind(
 serve.run(ingress, name="scale_style_app")
 
 logger.info("ScaleStyle Ray Serve Application is up and running")
+if GENERATION_ENABLED:
+    logger.info("Generation deployment enabled for LLM recommendation explanations")
+else:
+    logger.info("Generation deployment disabled (set GENERATION_ENABLED=1 to enable)")
 if VISION_ENABLED:
     logger.info("Vision deployment enabled for multimodal search")
 else:
     logger.info("Vision deployment disabled (set VISION_ENABLED=1 to enable)")
+
+
+def _shutdown(signum, frame):
+    logger.info("Received signal %s — shutting down Ray Serve", signum)
+    serve.shutdown()
+    sys.exit(0)
+
+
+signal.signal(signal.SIGTERM, _shutdown)
+signal.signal(signal.SIGINT, _shutdown)
+
+# Keep the container alive; Ray Serve runs in background threads.
+while True:
+    time.sleep(60)

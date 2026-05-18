@@ -1,8 +1,12 @@
 import sys
 from types import ModuleType
 
-from src import config as config_module
-from src.deployments import generation as generation_module
+# test_deployment_scaling_config.py stubs src.deployments.generation via setdefault
+# at collection time.  Pop it so we import the real module here.
+sys.modules.pop("src.deployments.generation", None)
+
+from src import config as config_module  # noqa: E402
+from src.deployments import generation as generation_module  # noqa: E402
 
 
 def test_generation_loader_pins_revision_without_remote_code(monkeypatch):

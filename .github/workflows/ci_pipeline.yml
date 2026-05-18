@@ -1,4 +1,4 @@
-name: CI Pipeline (Lint & Build)
+name: CI Pipeline (Lint, Test & Build)
 
 on:
   push:
@@ -22,14 +22,100 @@ jobs:
         run: pip install black ruff
       
       - name: Run Black Formatter Check
-        run: black --check inference-service/src data-pipeline/src
-        
+        run: black --check inference-service/src data-pipeline/src event-consumer/src
+
       - name: Run Ruff Linter
-        run: ruff check inference-service/src data-pipeline/src
+        run: ruff check inference-service/src data-pipeline/src event-consumer/src
 
 
-  # Job 2: Check Java/Gradle Build
-  java_build:
+  # Job 2: Python unit tests (no live Redis/Milvus/Ray/Kafka required)
+  python_test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: inference-service
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: inference-service/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: |
+          pytest tests/ -x -q \
+            --ignore=tests/test_image_etl.py \
+            --ignore=tests/integration \
+            --tb=short
+
+  # Job 3: data-pipeline unit tests (no live Redis/Milvus/Kafka/PySpark/Ray/H&M data required)
+  data_pipeline_test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: data-pipeline
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: data-pipeline/requirements-ci.txt
+
+      # CPU-only torch wheel (~400 MB) must be installed before requirements-ci.txt
+      # so pip resolves the correct torch variant rather than downloading the full GPU wheel.
+      - name: Install torch (CPU-only)
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install data-pipeline CI dependencies
+        run: pip install -r requirements-ci.txt
+
+      - name: Run data-pipeline unit tests
+        # Excluded:
+        #   tests/integration/   — requires live MinIO + Ray Data (test_ray_minio.py)
+        #   tests/test_features.py — requires PySpark / Java JVM
+        run: |
+          pytest tests/ -x -q \
+            --ignore=tests/integration \
+            --ignore=tests/test_features.py \
+            --tb=short
+
+  # Job 4: event-consumer unit tests (no live Kafka/Redis required)
+  event_consumer_test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: event-consumer
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: event-consumer/requirements.txt
+
+      - name: Install event-consumer dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run event-consumer unit tests
+        # Excluded:
+        #   tests/test_integration.py — requires live Kafka + Redis (docker-compose)
+        run: |
+          pytest tests/ -x -q \
+            --ignore=tests/test_integration.py \
+            --tb=short
+
+  # Job 5: Gateway Java – compile and unit tests (no live Redis/Kafka/inference required)
+  java_test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,10 +124,16 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
-      
-      - name: Grant Execute Permission for Gradle Wrapper
+          cache: 'gradle'
+
+      - name: Grant execute permission for Gradle wrapper
         run: chmod +x gateway-service/gradlew
-        
-      - name: Build with Gradle (Check Compilation)
-        # Use the Gradle Wrapper inside the gateway-service directory
-        run: ./gateway-service/gradlew build -p gateway-service/
+
+      - name: Compile gateway service
+        run: ./gateway-service/gradlew compileJava compileTestJava -p gateway-service/
+
+      - name: Run gateway unit tests
+        # All 12 test classes run without live infra (Mockito mocks, lazy Redis/Kafka connections).
+        # GatewayServiceApplicationTests uses @SpringBootTest but contextLoads() passes because
+        # Lettuce and Spring Kafka defer actual socket connections until first operation.
+        run: ./gateway-service/gradlew test -p gateway-service/

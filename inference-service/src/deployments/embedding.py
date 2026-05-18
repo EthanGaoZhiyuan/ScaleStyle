@@ -1,3 +1,4 @@
+import os
 import time
 import logging
 import asyncio
@@ -11,7 +12,9 @@ from src.config import EmbeddingConfig
 
 logger = logging.getLogger("scalestyle.embedding")
 
-EMBEDDING_MAX_ONGOING_REQUESTS = 4
+# Overridable via EMBEDDING_MAX_ONGOING_REQUESTS env var.
+# Default 4 prevents CPU oversubscription on the BGE-small model.
+EMBEDDING_MAX_ONGOING_REQUESTS = int(os.getenv("EMBEDDING_MAX_ONGOING_REQUESTS", "4"))
 
 
 @serve.deployment(
@@ -29,7 +32,7 @@ class EmbeddingDeployment:
     """
     Ray Serve deployment for text embedding generation using transformer models.
 
-    This deployment loads a pre-trained transformer model (default: BGE-large-en-v1.5)
+    This deployment loads a pre-trained transformer model (default: BGE-small-en-v1.5)
     and provides embedding generation for both queries and documents. Supports GPU
     acceleration when available and configurable resource allocation.
     """
@@ -93,9 +96,27 @@ class EmbeddingDeployment:
                         padding=True,
                         return_tensors="pt",
                     ).to(self.device)
-                    _ = self.model(**inputs)
+                    warmup_out = self.model(**inputs)
                 warmup_ms = (time.time() - t_warmup) * 1000
                 logger.info(f"Model warmup completed in {warmup_ms:.2f}ms")
+
+                # Validate output dimension against configured expectation.
+                actual_dim = warmup_out.last_hidden_state[:, 0].shape[-1]
+                expected_dim = EmbeddingConfig.EXPECTED_DIM
+                if actual_dim != expected_dim:
+                    logger.warning(
+                        "Embedding dim mismatch: model=%s produces %d-dim vectors but "
+                        "EXPECTED_EMBEDDING_DIM=%d. Milvus collection may be incompatible.",
+                        self.model_name,
+                        actual_dim,
+                        expected_dim,
+                    )
+                else:
+                    logger.info(
+                        "Embedding dim validated: %d-dim (model=%s)",
+                        actual_dim,
+                        self.model_name,
+                    )
             except Exception as e:
                 logger.warning(f"Model warmup failed (non-critical): {e}")
 
@@ -112,7 +133,7 @@ class EmbeddingDeployment:
             # Graceful handling of model loading failures
             # Instead of crashing, log error and keep pod running but unavailable
             logger.error(
-                f"❌ Failed to load embedding model '{self.model_name}': {e}\n"
+                f"Failed to load embedding model '{self.model_name}': {e}\n"
                 f"   This deployment will remain unavailable.\n"
                 f"   Possible causes:\n"
                 f"   - Network connectivity issues\n"

@@ -66,6 +66,15 @@ class RedisConfig:
     )
     # Enable TLS in production (EKS) against ElastiCache transit encryption.
     TLS = os.getenv("REDIS_TLS", "false").lower() in ("1", "true", "yes")
+    # Per-command read/write deadline for the Redis client.
+    # 10ms (old hardcoded) was localhost-only; 150ms covers Docker bridge (~1-5ms
+    # round-trip), ElastiCache (~0.5-3ms), and moderate-load spikes without hanging.
+    # The application-level personalization budget (PERSONALIZATION_TIMEOUT_MS=50ms)
+    # remains the outer guard; this is the socket-level last-resort cut-off.
+    SOCKET_CONNECT_TIMEOUT_SEC = (
+        float(os.getenv("REDIS_CONNECT_TIMEOUT_MS", "150")) / 1000.0
+    )
+    SOCKET_TIMEOUT_SEC = float(os.getenv("REDIS_SOCKET_TIMEOUT_MS", "150")) / 1000.0
 
 
 class MilvusConfig:
@@ -73,13 +82,18 @@ class MilvusConfig:
 
     HOST = os.getenv("MILVUS_HOST", "localhost")
     PORT = os.getenv("MILVUS_PORT", "19530")
-    COLLECTION = os.getenv("MILVUS_COLLECTION", "scale_style_bge_v2")
+    COLLECTION = os.getenv("MILVUS_COLLECTION", "scale_style_bge_small_v1_5")
 
 
 class EmbeddingConfig:
     """Embedding model configuration."""
 
-    MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-en-v1.5")
+    MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
+    # Expected output dimension of the active embedding model.
+    # BGE-small: 384, BGE-base: 768, BGE-large: 1024.
+    # Bootstrap and retrieval use EXPECTED_EMBEDDING_DIM to validate parquet data
+    # and log a warning when the loaded model produces a mismatched dimension.
+    EXPECTED_DIM = int(os.getenv("EXPECTED_EMBEDDING_DIM", "384"))
     MAX_LENGTH = int(os.getenv("EMBEDDING_MAX_LEN", "512"))
     # Keep the default Ray CPU reservation aligned with the 2 vCPU EKS inference pod.
     NUM_CPUS = float(os.getenv("EMBEDDING_NUM_CPUS", "0.5"))
@@ -88,9 +102,9 @@ class EmbeddingConfig:
         "EMBEDDING_QUERY_PREFIX",
         "Represent this sentence for searching relevant passages:",
     )
-    # Production-viable timeout for CPU-based BGE-large inference.
-    # A cold inference can take 200-500ms on CPU; 500ms allows headroom.
-    # GPU nodes should override to ~50-100ms via environment variable.
+    # K8s production default: wide enough for CPU cold-start (50–150ms warm; 500ms safety net).
+    # docker-compose local-dev overrides this to 200ms (EMBEDDING_TIMEOUT_MS=200)
+    # to keep the total stage budget within the 600ms gateway Reactor deadline.
     TIMEOUT_MS = int(os.getenv("EMBEDDING_TIMEOUT_MS", "500"))
 
 
@@ -98,9 +112,8 @@ class RetrievalConfig:
     """Retrieval and search configuration."""
 
     RECALL_K = int(os.getenv("RECALL_K", "100"))
-    # Production-viable timeout for Milvus ANN query over 100K+ vectors.
-    # Warm queries typically take 100-200ms; 300ms allows headroom for cold starts.
-    # GPU-accelerated or smaller collections can override to ~100ms.
+    # K8s production default: warm Milvus ANN queries take 100–200ms; 300ms for cold starts.
+    # docker-compose local-dev overrides this to 150ms (RETRIEVAL_TIMEOUT_MS=150).
     TIMEOUT_MS = int(os.getenv("RETRIEVAL_TIMEOUT_MS", "300"))
 
 
@@ -108,14 +121,14 @@ class RerankerConfig:
     """Reranker model configuration."""
 
     ENABLED = _get_bool_env("RERANKER_ENABLED", True)
-    MODEL = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+    MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-base")
     DEVICE = os.getenv("RERANKER_DEVICE", "cpu")
     BATCH_SIZE = int(os.getenv("RERANKER_BATCH_SIZE", "16"))
     MAX_DOCS = int(os.getenv("RERANKER_MAX_DOCS", "50"))
     MODE = os.getenv("RERANKER_MODE", "cross-encoder")
-    # Production-viable timeout for CPU-based cross-encoder reranking.
-    # Batch inference over 50 docs typically takes 150-200ms; 250ms allows headroom.
-    # GPU nodes should override to ~50-100ms via environment variable.
+    # K8s production default: CPU cross-encoder over 50 docs takes 150–200ms; 250ms safety net.
+    # docker-compose local-dev overrides this to 120ms (RERANKER_TIMEOUT_MS=120).
+    # On CPU the reranker frequently hits the timeout; GPU nodes see ~50ms.
     TIMEOUT_MS = int(os.getenv("RERANKER_TIMEOUT_MS", "250"))
     WARMUP = _get_bool_env("RERANKER_WARMUP", True)
 
@@ -131,7 +144,7 @@ class GenerationConfig:
 
     ENABLED = _get_bool_env("GENERATION_ENABLED", False)
     MODE = os.getenv("GENERATION_MODE", "template").lower()
-    TIMEOUT_MS = int(os.getenv("GENERATION_TIMEOUT_MS", "10"))
+    TIMEOUT_MS = int(os.getenv("GENERATION_TIMEOUT_MS", "50"))
     FLOW = os.getenv("GENERATION_FLOW", "smart")
     MODEL = os.getenv(
         "GENERATION_MODEL",
@@ -153,6 +166,7 @@ class PersonalizationConfig:
     """Personalization behavior boost configuration."""
 
     ENABLED = _get_bool_env("PERSONALIZATION_ENABLED", True)
+    SNAPSHOT_TIMEOUT_MS = int(os.getenv("PERSONALIZATION_TIMEOUT_MS", "50"))
     EXACT_CLICK_BOOST = float(os.getenv("EXACT_CLICK_BOOST", "1.5"))
     CATEGORY_AFFINITY_BOOST = float(os.getenv("CATEGORY_AFFINITY_BOOST", "1.2"))
     POPULARITY_1H_BOOST = float(os.getenv("POPULARITY_1H_BOOST", "0.20"))
@@ -173,11 +187,3 @@ class InferenceConfig:
     ab_test = ABTestConfig
     generation = GenerationConfig
     personalization = PersonalizationConfig
-
-
-class Config:
-    """Legacy data pipeline configuration."""
-
-    DEFAULT_DATA_PATH = "../data-pipeline/data/processed/"
-    DATA_PATH = os.getenv("DATA_PATH", DEFAULT_DATA_PATH)
-    PORT = 50051

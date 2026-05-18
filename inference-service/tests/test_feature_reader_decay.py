@@ -9,7 +9,7 @@ sys.path.insert(
     0, str(Path(__file__).parent.parent.parent / "inference-service" / "src")
 )
 
-from personalization.feature_reader_legacy import LegacyFeatureReader
+from personalization.legacy.feature_reader_legacy import LegacyFeatureReader
 
 
 def test_category_affinity_read_applies_lazy_decay():
@@ -29,7 +29,9 @@ def test_category_affinity_read_applies_lazy_decay():
     # Seven-day half-life is the default. One half-life after update, score halves.
     half_life_seconds = 7 * 86400
     now = 1000.0 + half_life_seconds
-    with patch("personalization.feature_reader_legacy.time.time", return_value=now):
+    with patch(
+        "personalization.legacy.feature_reader_legacy.time.time", return_value=now
+    ):
         affinity = reader.get_user_category_affinity("user-1")
 
     assert affinity["dress"] == pytest.approx(1.0, rel=1e-6)

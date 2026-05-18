@@ -37,7 +37,7 @@ try:
     RAY_AVAILABLE = True
 except ImportError:
     RAY_AVAILABLE = False
-    print("⚠️  Ray not available, using simple batch processing")
+    print("Ray not available, using simple batch processing")
 
 
 class ImageETL:
@@ -93,7 +93,7 @@ class ImageETL:
         self._model = CLIPModel.from_pretrained(model_id).to(self.device)
         self._processor = CLIPProcessor.from_pretrained(model_id)
         self._model.eval()  # Set to evaluation mode
-        print(f"✅ Model loaded on worker (PID: {os.getpid()})")
+        print(f"Model loaded on worker (PID: {os.getpid()})")
 
         return self._model, self._processor
 
@@ -102,7 +102,7 @@ class ImageETL:
         print(f"\nLoading metadata from {self.metadata_path}...")
         df = pd.read_csv(self.metadata_path)
 
-        print(f"✅ Loaded {len(df)} articles")
+        print(f"Loaded {len(df)} articles")
 
         # Create image paths
         # H&M format: images/0{article_id[:3]}/{article_id}.jpg
@@ -119,7 +119,7 @@ class ImageETL:
         df["exists"] = df["image_path"].apply(lambda p: p.exists())
         df_valid = df[df["exists"]].copy()
 
-        print(f"✅ Found {len(df_valid)}/{len(df)} images on disk")
+        print(f"Found {len(df_valid)}/{len(df)} images on disk")
 
         return df_valid[["article_id", "image_path"]]
 
@@ -164,7 +164,7 @@ class ImageETL:
             }
 
         except Exception as e:
-            print(f"⚠️  Error processing {row.get('article_id')}: {e}")
+            print(f"Error processing {row.get('article_id')}: {e}")
             return None
 
     def run_simple(self, output_path: Path, limit: Optional[int] = None):
@@ -180,7 +180,7 @@ class ImageETL:
 
         if limit:
             df_metadata = df_metadata.head(limit)
-            print(f"⚠️  Limited to {limit} images for testing")
+            print(f"Limited to {limit} images for testing")
 
         print(f"\nProcessing {len(df_metadata)} images...")
         print(f"Batch size: {self.batch_size}")
@@ -227,7 +227,7 @@ class ImageETL:
 
         if limit:
             df_metadata = df_metadata.head(limit)
-            print(f"⚠️  Limited to {limit} images for testing")
+            print(f"Limited to {limit} images for testing")
 
         print(f"\nProcessing {len(df_metadata)} images with Ray...")
         print(f"Workers: {num_workers}")
@@ -249,11 +249,11 @@ class ImageETL:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         ds_valid.write_parquet(str(output_path))
 
-        print(f"\n✅ Saved embeddings to {output_path}")
+        print(f"\nSaved embeddings to {output_path}")
 
         # Validate
         df_result = pd.read_parquet(output_path)
-        print(f"✅ Wrote {len(df_result)} records")
+        print(f"Wrote {len(df_result)} records")
         print(f"   Columns: {df_result.columns.tolist()}")
 
         sample_emb = df_result.iloc[0]["embedding"]

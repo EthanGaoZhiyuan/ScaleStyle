@@ -6,7 +6,13 @@ degradation in K8s deployments without explicit overrides.
 """
 
 import os
-from src.config import EmbeddingConfig, RetrievalConfig, RerankerConfig
+from src.config import (
+    EmbeddingConfig,
+    RetrievalConfig,
+    RerankerConfig,
+    GenerationConfig,
+    PersonalizationConfig,
+)
 
 
 def test_embedding_timeout_production_viable():
@@ -14,7 +20,7 @@ def test_embedding_timeout_production_viable():
     # Default should be 500ms (enough for cold CPU inference)
     assert (
         EmbeddingConfig.TIMEOUT_MS == 500
-    ), "EMBEDDING_TIMEOUT_MS default should be 500ms for CPU-based BGE-large"
+    ), "EMBEDDING_TIMEOUT_MS default should be 500ms for CPU-based BGE-small"
 
 
 def test_retrieval_timeout_production_viable():
@@ -63,54 +69,38 @@ def test_timeout_environment_override():
                 os.environ[var] = val
 
 
-def test_timeout_comparison_with_docker_compose():
+def test_timeout_hierarchy_within_gateway_deadline():
     """
-    Document relationship between config.py defaults and docker-compose overrides.
+    Enforce the timeout budget hierarchy:
 
-    This test serves as documentation for the timeout architecture:
-    - config.py defaults: Production-viable for CPU-only K8s nodes
-    - docker-compose.yml: More generous for local dev (allows debugging)
-    - GPU deployments: Should override via environment to tighter values
+      inner optional stage timeout < gateway application deadline (500ms)
+
+    docker-compose tightens all stage timeouts so that, even in the worst
+    case where embed + retrieve + rerank all run sequentially, the total
+    stays inside the 500ms Reactor deadline on the gateway side.
+
+    Production K8s defaults (config.py) are intentionally wider because
+    nodes have more predictable latency and GPU acceleration; they are not
+    constrained by the local-dev 500ms budget.
     """
-    # config.py defaults (production-viable for CPU)
-    config_defaults = {
-        "EMBEDDING_TIMEOUT_MS": 500,
-        "RETRIEVAL_TIMEOUT_MS": 300,
-        "RERANKER_TIMEOUT_MS": 250,
-    }
-
-    # docker-compose.yml typical overrides (generous for local dev)
+    # docker-compose local-dev overrides (must all be < 600ms gateway deadline)
+    GATEWAY_DEADLINE_MS = 600
     docker_overrides = {
-        "EMBEDDING_TIMEOUT_MS": 1200,
-        "RETRIEVAL_TIMEOUT_MS": 800,
-        "RERANKER_TIMEOUT_MS": 1200,
+        "EMBEDDING_TIMEOUT_MS": 200,
+        "RETRIEVAL_TIMEOUT_MS": 150,
+        "RERANKER_TIMEOUT_MS": 120,
+        "GENERATION_TIMEOUT_MS": 50,
+        "PERSONALIZATION_TIMEOUT_MS": 50,
     }
 
-    # Verify config defaults are reasonable (not absurdly tight)
-    assert (
-        config_defaults["EMBEDDING_TIMEOUT_MS"] >= 200
-    ), "Embedding timeout too tight for cold CPU inference"
-    assert (
-        config_defaults["RETRIEVAL_TIMEOUT_MS"] >= 100
-    ), "Retrieval timeout too tight for Milvus queries"
-    assert (
-        config_defaults["RERANKER_TIMEOUT_MS"] >= 100
-    ), "Reranker timeout too tight for CPU inference"
+    for name, value in docker_overrides.items():
+        assert (
+            value < GATEWAY_DEADLINE_MS
+        ), f"{name}={value}ms exceeds gateway deadline {GATEWAY_DEADLINE_MS}ms"
 
-    # Verify docker-compose overrides are more generous
-    assert (
-        docker_overrides["EMBEDDING_TIMEOUT_MS"]
-        > config_defaults["EMBEDDING_TIMEOUT_MS"]
-    )
-    assert (
-        docker_overrides["RETRIEVAL_TIMEOUT_MS"]
-        > config_defaults["RETRIEVAL_TIMEOUT_MS"]
-    )
-    assert (
-        docker_overrides["RERANKER_TIMEOUT_MS"] > config_defaults["RERANKER_TIMEOUT_MS"]
-    )
-
-    # Document that actual config values match expectations
-    assert EmbeddingConfig.TIMEOUT_MS == config_defaults["EMBEDDING_TIMEOUT_MS"]
-    assert RetrievalConfig.TIMEOUT_MS == config_defaults["RETRIEVAL_TIMEOUT_MS"]
-    assert RerankerConfig.TIMEOUT_MS == config_defaults["RERANKER_TIMEOUT_MS"]
+    # Document that actual config.py defaults match expectations
+    assert EmbeddingConfig.TIMEOUT_MS == 500
+    assert RetrievalConfig.TIMEOUT_MS == 300
+    assert RerankerConfig.TIMEOUT_MS == 250
+    assert GenerationConfig.TIMEOUT_MS == 50
+    assert PersonalizationConfig.SNAPSHOT_TIMEOUT_MS == 50

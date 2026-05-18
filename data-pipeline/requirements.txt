@@ -26,6 +26,16 @@ black==25.12.0
 ruff==0.14.8
 
 # ==========================================
+# Embedding Generation (generate_embeddings.py)
+# Install torch separately for your platform before the rest:
+#   CPU-only:  pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   CUDA 12.x: pip install torch  (default wheel includes CUDA)
+# ==========================================
+torch>=2.0.0
+transformers>=4.40.0
+Pillow>=9.0.0
+
+# ==========================================
 # Utilities
 # ==========================================
 redis==7.1.0

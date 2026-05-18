@@ -3,6 +3,9 @@ package com.scalestyle.gateway.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scalestyle.gateway.common.DegradationReason;
+import com.scalestyle.gateway.dto.HybridItemDTO;
+import com.scalestyle.gateway.dto.HybridSearchRequest;
+import com.scalestyle.gateway.dto.HybridSearchResponse;
 import com.scalestyle.gateway.dto.ImageSearchRequest;
 import com.scalestyle.gateway.dto.ImageSearchResponse;
 import com.scalestyle.gateway.dto.InferenceSearchRequest;
@@ -12,17 +15,11 @@ import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.reactor.circuitbreaker.operator.CircuitBreakerOperator;
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.Gauge;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanContext;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -41,7 +38,6 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -50,7 +46,11 @@ public class RecommendationService {
 
     private static final String RECOMMENDATION_CACHE_PREFIX = "rec:v1:";
     private static final Duration CACHE_TTL = Duration.ofMinutes(5);
-    private static final Duration REQUEST_TIMEOUT = Duration.ofMillis(350);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofMillis(600);
+
+    /** Dedicated mapper for hybrid items — ignores unknown fields (finalScore, imageScore, etc.). */
+    private static final ObjectMapper HYBRID_ITEM_MAPPER = new ObjectMapper()
+            .configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     private static final String DEFAULT_POPULARITY_MATERIALIZED_PREFIX = "popularity:materialized";
 
     /**
@@ -102,16 +102,19 @@ public class RecommendationService {
     @Value("${recommendation.fallback.popularity.window.7d.bucket-seconds:86400}")
     private long popularityWindow7dBucketSeconds = 86400L;
 
+    // Tier 3: static bootstrap key written by data-pipeline from transactions_train.csv.
+    // Read when both materialized windows are empty (cold start / local dev).
+    @Value("${recommendation.fallback.popularity.global-key:global:popular}")
+    private String fallbackPopularityGlobalKey = "global:popular";
+
     private final WebClient webClient;
     private final ProductCacheService productCacheService;
-    private final MeterRegistry meterRegistry;
+    private final RecommendationMetrics metrics;
     private final org.springframework.data.redis.core.StringRedisTemplate recommendationCacheTemplate;
     private final ObjectMapper cacheObjectMapper;
     private final Scheduler inferenceScheduler;
     private final org.springframework.data.redis.core.StringRedisTemplate stringRedisTemplate;
     private final CircuitBreaker circuitBreaker;
-    private RecommendationService self;
-    
     /**
      * Per-request miss ratio threshold for structured WARN log.
      * When a single request's miss ratio hits or exceeds this value, a log line with a
@@ -119,33 +122,6 @@ public class RecommendationService {
      * alerting rules can grep/filter for it without needing Prometheus.
      */
     private static final double MISS_RATIO_WARN_THRESHOLD = 0.3;
-
-    /**
-     * EMA smoothing factor for {@code recommendation_metadata_miss_ratio}.
-     * 0.2 weights the most recent request at 20%, providing a fast-moving but
-     * noise-resistant signal.  Lower values make the gauge lag more; higher values
-     * make it react faster to individual noisy requests.
-     */
-    private static final double EMA_ALPHA = 0.2;
-
-    private final Counter degradedTotalCounter;
-    private final Counter raySuccessCounter;
-    private final Counter rayFailureCounter;
-    private final Counter metadataMissCounter;
-    private final Counter requestedCandidatesCounter;
-    private final Counter returnedCandidatesCounter;
-    private final Timer queueWaitTimer;
-    private final Timer inferenceHttpTimer;
-    private final Timer metadataEnrichmentTimer;
-    private final Timer fallbackTimer;
-
-    /**
-     * Exponential moving average of per-request metadata miss ratio (0.0–1.0).
-     * Updated after every Ray-path assembly.  Exposed as the Micrometer gauge
-     * {@code recommendation_metadata_miss_ratio} so a single Prometheus alert rule
-     * on this gauge replaces manual ratio arithmetic across two counters.
-     */
-    private final AtomicReference<Double> missRatioEma = new AtomicReference<>(0.0);
 
     public RecommendationService(
             WebClient inferenceWebClient,
@@ -156,82 +132,18 @@ public class RecommendationService {
             @Qualifier("cacheExecutor")     Executor cacheExecutor,
             org.springframework.data.redis.core.StringRedisTemplate stringRedisTemplate,
             CircuitBreakerRegistry circuitBreakerRegistry,
-            MeterRegistry meterRegistry) {
+            RecommendationMetrics metrics) {
         this.webClient = inferenceWebClient;
         this.productCacheService = productCacheService;
-        this.meterRegistry = meterRegistry;
+        this.metrics = metrics;
         this.recommendationCacheTemplate = recommendationCacheTemplate;
         this.cacheObjectMapper = recommendationCacheObjectMapper;
         this.inferenceScheduler = Schedulers.fromExecutor(inferenceExecutor);
         this.cacheScheduler    = Schedulers.fromExecutor(cacheExecutor);
         this.stringRedisTemplate = stringRedisTemplate;
         this.circuitBreaker = circuitBreakerRegistry.circuitBreaker("ray");
-        this.degradedTotalCounter = Counter.builder("recommendation_degraded_total")
-                .description("Total count of degraded recommendations (fallback to Redis)")
-                .tag("service", "gateway")
-                .register(meterRegistry);
-        
-        this.raySuccessCounter = Counter.builder("recommendation_ray_success_total")
-                .description("Total count of successful Ray inference calls")
-                .tag("service", "gateway")
-                .register(meterRegistry);
-        
-        this.rayFailureCounter = Counter.builder("recommendation_ray_failure_total")
-                .description("Total count of failed Ray inference calls")
-                .tag("service", "gateway")
-                .register(meterRegistry);
-
-        this.metadataMissCounter = Counter.builder("recommendation_metadata_miss_total")
-                .description("Product items excluded from recommendations due to missing metadata in Redis")
-                .tag("service", "gateway")
-                .register(meterRegistry);
-        this.requestedCandidatesCounter = Counter.builder("recommendation_requested_candidates_total")
-                .description("Total candidate IDs looked up for product metadata (denominator for miss ratio by requested)")
-                .tag("service", "gateway")
-                .register(meterRegistry);
-        this.returnedCandidatesCounter = Counter.builder("recommendation_returned_candidates_total")
-                .description("Total candidates with metadata included in result set (denominator for miss ratio by returned)")
-                .tag("service", "gateway")
-                .register(meterRegistry);
-        this.queueWaitTimer = Timer.builder("recommendation_phase_duration_seconds")
-                .description("Recommendation request phase duration")
-                .tag("service", "gateway")
-                .tag("phase", "admission_queue_wait")
-                .publishPercentileHistogram()
-                .register(meterRegistry);
-        this.inferenceHttpTimer = Timer.builder("recommendation_phase_duration_seconds")
-                .description("Recommendation request phase duration")
-                .tag("service", "gateway")
-                .tag("phase", "inference_http")
-                .publishPercentileHistogram()
-                .register(meterRegistry);
-        this.metadataEnrichmentTimer = Timer.builder("recommendation_phase_duration_seconds")
-                .description("Recommendation request phase duration")
-                .tag("service", "gateway")
-                .tag("phase", "metadata_enrichment")
-                .publishPercentileHistogram()
-                .register(meterRegistry);
-        this.fallbackTimer = Timer.builder("recommendation_phase_duration_seconds")
-                .description("Recommendation request phase duration")
-                .tag("service", "gateway")
-                .tag("phase", "fallback")
-                .publishPercentileHistogram()
-                .register(meterRegistry);
-        Gauge.builder("recommendation_metadata_miss_ratio", missRatioEma, AtomicReference::get)
-                .description("Exponential moving average (alpha=0.2) of per-request metadata miss ratio (0.0–1.0). "
-                        + "Alert when sustained value exceeds bootstrap-gap threshold.")
-                .tag("service", "gateway")
-                .register(meterRegistry);
     }
     
-    /**
-     * Self-injection for AOP proxy support.
-     */
-    @Autowired
-    public void setSelf(@Lazy RecommendationService self) {
-        this.self = self;
-    }
-
     /**
      * Asynchronous recommendation search with end-to-end reactive pipeline.
      * Circuit breaker, timeout, and error handling are all reactive operators.
@@ -249,7 +161,7 @@ public class RecommendationService {
         boolean personalized = isPersonalized(userId);
         RequestContext ctx = new RequestContext(UUID.randomUUID().toString(), currentTraceId(), System.nanoTime());
         return Mono.defer(() -> {
-                    queueWaitTimer.record(Duration.ofNanos(System.nanoTime() - ctx.enqueuedAtNanos()));
+                    metrics.recordQueueWait(Duration.ofNanos(System.nanoTime() - ctx.enqueuedAtNanos()));
                     log.info("request_id={} trace_id={} phase=admission_queue_wait outcome=scheduled query_hash={} k={} personalized={}",
                             ctx.requestId(), ctx.traceId(), queryHash(query), k, personalized);
                     return callRayInferenceReactive(query, userId, intent, k, debug, personalized, ctx);
@@ -261,13 +173,14 @@ public class RecommendationService {
                     DegradationReason degradedReason = mapInferenceDegradationReason(throwable);
                     log.warn("request_id={} trace_id={} phase=inference_http outcome=degraded query_hash={} k={} personalized={} degrade_reason={}",
                             ctx.requestId(), ctx.traceId(), queryHash(query), k, personalized, degradedReason.name());
-                    degradedTotalCounter.increment();
+                    metrics.incrementDegradedTotal();
                     recordDegradedReason(degradedReason);
                     return getFallbackResultsMono(query, intent, k, degradedReason, personalized, ctx);
                 })
+                .contextCapture()
                 .toFuture();
     }
-    
+
     /**
      * Core Ray inference call as pure reactive pipeline.
      * No blocking - returns Mono for end-to-end reactive composition.
@@ -307,12 +220,12 @@ public class RecommendationService {
                     if (resp == null || resp.getResults() == null) {
                         log.warn("Ray returned empty response: query_hash={}, k={}, personalized={}",
                                 queryHash(query), k, personalized);
-                        rayFailureCounter.increment();
+                        metrics.incrementRayFailure();
                         return Mono.error(new RuntimeException("Inference service returned empty response"));
                     }
 
                     List<String> articleIds = resp.getResults().stream()
-                            .map(item -> String.valueOf(item.getArticle_id()))
+                            .map(InferenceSearchResponse.ResultItem::getArticle_id)
                             .collect(Collectors.toList());
 
                     // All blocking work (L1/L2 cache read + rec-cache write) in one
@@ -326,8 +239,7 @@ public class RecommendationService {
                         Map<String, InferenceSearchResponse.ResultItem> inferenceByArticleId =
                                 new LinkedHashMap<>();
                         for (InferenceSearchResponse.ResultItem inferenceItem : resp.getResults()) {
-                            inferenceByArticleId.put(
-                                    String.valueOf(inferenceItem.getArticle_id()), inferenceItem);
+                            inferenceByArticleId.put(inferenceItem.getArticle_id(), inferenceItem);
                         }
 
                         // Enrich with product metadata, skipping items whose metadata is
@@ -350,21 +262,24 @@ public class RecommendationService {
                                 dto.setReason(inferenceItem.getReason());
                                 dto.setReasonSource(inferenceItem.getReasonSource());
                             }
-                            dto.setSource("ray");
-                            dto.setDegraded(false);
+                            dto.setSource(resp.getSource() != null ? resp.getSource() : "ray");
+                            dto.setDegraded(resp.isDegraded());
+                            if (resp.isDegraded() && resp.getDegradedReason() != null) {
+                                dto.setDegradedReason(resp.getDegradedReason());
+                            }
                             results.add(dto);
                         }
                         if (metadataMissCount > 0) {
-                            metadataMissCounter.increment(metadataMissCount);
+                            metrics.incrementMetadataMiss(metadataMissCount);
                         }
-                        requestedCandidatesCounter.increment(articleIds.size());
-                        returnedCandidatesCounter.increment(results.size());
+                        metrics.incrementRequestedCandidates(articleIds.size());
+                        metrics.incrementReturnedCandidates(results.size());
 
                         // Per-request miss ratio: update EMA gauge and emit structured WARN
                         // when ratio exceeds the operational threshold.
                         double missRatio = articleIds.isEmpty() ? 0.0
                                 : (double) metadataMissCount / articleIds.size();
-                        missRatioEma.updateAndGet(prev -> EMA_ALPHA * missRatio + (1 - EMA_ALPHA) * prev);
+                        metrics.updateMissRatioEma(missRatio);
 
                         if (missRatio >= MISS_RATIO_WARN_THRESHOLD) {
                             // Fixed log key METADATA_MISS_RATIO_HIGH for grep/alert in log aggregators.
@@ -417,21 +332,21 @@ public class RecommendationService {
 
                             return results;
                         } finally {
-                            metadataEnrichmentTimer.record(Duration.ofNanos(System.nanoTime() - enrichStartNanos));
+                            metrics.recordMetadataEnrichment(Duration.ofNanos(System.nanoTime() - enrichStartNanos));
                         }
                     }).subscribeOn(cacheScheduler);
                 })
                 .doOnSuccess(results -> {
-                    inferenceHttpTimer.record(Duration.ofNanos(System.nanoTime() - httpStartNanos));
-                    raySuccessCounter.increment();
+                    metrics.recordInferenceHttp(Duration.ofNanos(System.nanoTime() - httpStartNanos));
+                    metrics.incrementRaySuccess();
                     log.info("request_id={} trace_id={} phase=inference_http outcome=success results={}",
                             ctx.requestId(), ctx.traceId(), results.size());
                 })
                 .doOnError(e -> {
-                    inferenceHttpTimer.record(Duration.ofNanos(System.nanoTime() - httpStartNanos));
+                    metrics.recordInferenceHttp(Duration.ofNanos(System.nanoTime() - httpStartNanos));
                     log.error("request_id={} trace_id={} phase=inference_http outcome=error query_hash={} k={} personalized={} error={}",
                             ctx.requestId(), ctx.traceId(), queryHash(query), k, personalized, e.getMessage());
-                    rayFailureCounter.increment();
+                    metrics.incrementRayFailure();
                 });
     }
     
@@ -463,7 +378,7 @@ public class RecommendationService {
         if (personalized) {
             log.debug("Personalized request: bypassing shared query cache, routing to popular items");
             return getPopularItemsFallbackMono(k, triggerReason)
-                    .doFinally(signalType -> fallbackTimer.record(Duration.ofNanos(System.nanoTime() - fallbackStartNanos)));
+                    .doFinally(signalType -> metrics.recordFallback(Duration.ofNanos(System.nanoTime() - fallbackStartNanos)));
         }
 
         String cacheKey = buildCacheKey(query, intent, k);
@@ -503,7 +418,7 @@ public class RecommendationService {
             return getPopularItemsFallbackMono(k, cacheFallbackReason);
         })
         .doFinally(signalType -> {
-            fallbackTimer.record(Duration.ofNanos(System.nanoTime() - fallbackStartNanos));
+            metrics.recordFallback(Duration.ofNanos(System.nanoTime() - fallbackStartNanos));
             log.info("request_id={} trace_id={} phase=fallback outcome={} personalized={}",
                     ctx.requestId(), ctx.traceId(), triggerReason.name(), personalized);
         });
@@ -523,8 +438,8 @@ public class RecommendationService {
             PopularityFallbackSource popularitySource = resolveFallbackPopularitySource(popularFetchCount);
             java.util.Set<String> popularIds = popularitySource.ids();
             if (popularIds == null || popularIds.isEmpty()) {
-                log.warn("No materialized popularity window available [returning empty fallback]: k={}, degrade_reason={}, primary_window={}, secondary_window={}",
-                        k, degradedReason.name(), fallbackPopularityPrimaryWindow, fallbackPopularitySecondaryWindow);
+                log.warn("All popularity fallback tiers empty [returning empty]: k={}, degrade_reason={}, primary={}, secondary={}, global_key={}",
+                        k, degradedReason.name(), fallbackPopularityPrimaryWindow, fallbackPopularitySecondaryWindow, fallbackPopularityGlobalKey);
                 return List.<RecommendationDTO>of();
             }
             // Pass all fetched candidates; getProducts filters to those with metadata.
@@ -540,8 +455,10 @@ public class RecommendationService {
                                 + "k={}, degrade_reason={}, returned={}",
                         k, degradedReason.name(), results.size());
             }
+            final String fallbackSource = "global".equals(popularitySource.window())
+                    ? "global-popular-fallback" : "popular-fallback";
             results.forEach(dto -> {
-                dto.setSource("popular-fallback");
+                dto.setSource(fallbackSource);
                 dto.setDegraded(true);
                 dto.setDegradedReason(degradedReason.name());
             });
@@ -559,6 +476,7 @@ public class RecommendationService {
     }
 
     private PopularityFallbackSource resolveFallbackPopularitySource(int fetchCount) {
+        // Tier 1: primary materialized window (default: 24h rolling, from event-consumer)
         String primaryKey = buildFallbackPopularityKey(fallbackPopularityPrimaryWindow);
         java.util.Set<String> primaryIds = stringRedisTemplate.opsForZSet()
                 .reverseRange(primaryKey, 0, fetchCount - 1);
@@ -567,26 +485,57 @@ public class RecommendationService {
         }
         recordFallbackPopularityWindow(fallbackPopularityPrimaryWindow, "empty");
 
-        String secondaryWindow = fallbackPopularitySecondaryWindow;
-        if (secondaryWindow == null || secondaryWindow.isBlank()
-                || secondaryWindow.equals(fallbackPopularityPrimaryWindow)) {
-            return new PopularityFallbackSource(fallbackPopularityPrimaryWindow, primaryKey, primaryIds);
+        // Tier 2: secondary materialized window (default: 7d rolling, from event-consumer)
+        if (fallbackPopularitySecondaryWindow != null && !fallbackPopularitySecondaryWindow.isBlank()
+                && !fallbackPopularitySecondaryWindow.equals(fallbackPopularityPrimaryWindow)) {
+            String secondaryKey = buildFallbackPopularityKey(fallbackPopularitySecondaryWindow);
+            java.util.Set<String> secondaryIds = stringRedisTemplate.opsForZSet()
+                    .reverseRange(secondaryKey, 0, fetchCount - 1);
+            if (secondaryIds != null && !secondaryIds.isEmpty()) {
+                return new PopularityFallbackSource(fallbackPopularitySecondaryWindow, secondaryKey, secondaryIds);
+            }
+            recordFallbackPopularityWindow(fallbackPopularitySecondaryWindow, "empty");
         }
 
-        String secondaryKey = buildFallbackPopularityKey(secondaryWindow);
-        java.util.Set<String> secondaryIds = stringRedisTemplate.opsForZSet()
-                .reverseRange(secondaryKey, 0, fetchCount - 1);
-        if (secondaryIds != null && !secondaryIds.isEmpty()) {
-            return new PopularityFallbackSource(secondaryWindow, secondaryKey, secondaryIds);
-        }
-        recordFallbackPopularityWindow(secondaryWindow, "empty");
-        return new PopularityFallbackSource(secondaryWindow, secondaryKey, secondaryIds);
+        // Tier 3: static bootstrap key (global:popular) written by data-pipeline from
+        // transactions_train.csv purchase counts.  Present immediately after bootstrap;
+        // does not require event-consumer materialization.  Correct final tier for
+        // cold-start and local dev where materialized windows have never been populated.
+        java.util.Set<String> globalIds = stringRedisTemplate.opsForZSet()
+                .reverseRange(fallbackPopularityGlobalKey, 0, fetchCount - 1);
+        return new PopularityFallbackSource("global", fallbackPopularityGlobalKey, globalIds);
     }
 
     private String buildFallbackPopularityKey(String window) {
         long bucketSeconds = bucketSecondsForWindow(window);
-        long bucketStart = (Instant.now().getEpochSecond() / bucketSeconds) * bucketSeconds;
-        return fallbackPopularityMaterializedPrefix + ":" + window + ":" + bucketStart;
+        return popularityMaterializedKey(
+                fallbackPopularityMaterializedPrefix, window,
+                Instant.now().getEpochSecond(), bucketSeconds);
+    }
+
+    /**
+     * Computes a popularity materialized-window Redis key.
+     *
+     * Formula (must stay in sync with Python inference-service):
+     *   key = "{prefix}:{window}:{bucketStart}"
+     *   bucketStart = floor(nowEpochSeconds / bucketSeconds) * bucketSeconds
+     *
+     * Rounding is integer floor division on Unix epoch seconds (UTC). No timezone
+     * offset is applied. The resulting bucketStart is always a multiple of bucketSeconds.
+     *
+     * Default bucket sizes (overridable via Spring @Value / env):
+     *   "1h"  → bucketSeconds = 300   (5-min buckets, 12 per window)
+     *   "24h" → bucketSeconds = 3600  (1-hour buckets, 24 per window)
+     *   "7d"  → bucketSeconds = 86400 (1-day buckets, 7 per window)
+     *
+     * Cross-language reference:
+     *   inference-service/src/personalization/popularity_windows.py :: materialized_window_key()
+     * Drift test:
+     *   PopularityKeyFormulaTest — same fixed timestamp, same expected string in Java and Python.
+     */
+    static String popularityMaterializedKey(String prefix, String window, long nowEpochSeconds, long bucketSeconds) {
+        long bucketStart = (nowEpochSeconds / bucketSeconds) * bucketSeconds;
+        return prefix + ":" + window + ":" + bucketStart;
     }
 
     private long bucketSecondsForWindow(String window) {
@@ -599,12 +548,7 @@ public class RecommendationService {
     }
 
     private void recordFallbackPopularityWindow(String window, String outcome) {
-        meterRegistry.counter(
-                "recommendation_fallback_popularity_window_total",
-                "service", "gateway",
-                "window", window,
-                "outcome", outcome
-        ).increment();
+        metrics.recordFallbackPopularityWindow(window, outcome);
     }
     
 
@@ -643,7 +587,7 @@ public class RecommendationService {
                     DegradationReason imageFailReason = mapInferenceDegradationReason(throwable);
                     log.warn("Image search failed or timed out: mode={}, k={}, degrade_reason={}",
                             request.getMode(), k, imageFailReason.name());
-                    degradedTotalCounter.increment();
+                    metrics.incrementDegradedTotal();
                     recordDegradedReason(imageFailReason);
 
                     if (request.getQuery() != null && !request.getQuery().isBlank()) {
@@ -699,9 +643,10 @@ public class RecommendationService {
                                     .degradedReason(imageFailReason.name())
                                     .build());
                 })
+                .contextCapture()
                 .toFuture();
     }
-    
+
     /**
      * Core image search call as pure reactive pipeline.
      * No blocking - returns Mono for end-to-end reactive composition.
@@ -778,22 +723,14 @@ public class RecommendationService {
         return computeSha1(query.toLowerCase().trim()).substring(0, 8);
     }
 
-    /**
-     * Computes SHA-1 hash of input string.
-     */
     private String computeSha1(String input) {
         try {
-            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-1");
-            byte[] hash = digest.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            StringBuilder hexString = new StringBuilder();
-            for (byte b : hash) {
-                String hex = Integer.toHexString(0xff & b);
-                if (hex.length() == 1) hexString.append('0');
-                hexString.append(hex);
-            }
-            return hexString.toString();
+            byte[] hash = java.security.MessageDigest.getInstance("SHA-1")
+                    .digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(hash);
         } catch (java.security.NoSuchAlgorithmException e) {
-            return String.valueOf(input.hashCode());
+            // SHA-1 is mandated by the Java SE spec and cannot be absent.
+            throw new IllegalStateException("SHA-1 unavailable", e);
         }
     }
     
@@ -818,11 +755,7 @@ public class RecommendationService {
     }
 
     private void recordDegradedReason(DegradationReason reason) {
-        meterRegistry.counter(
-                "recommendation_degraded_reason_total",
-                "service", "gateway",
-                "reason", reason.name()
-        ).increment();
+        metrics.recordDegradedReason(reason);
     }
 
     private DegradationReason mapInferenceDegradationReason(Throwable throwable) {
@@ -855,5 +788,119 @@ public class RecommendationService {
     }
 
     private record PopularityFallbackSource(String window, String key, java.util.Set<String> ids) {
+    }
+
+    /**
+     * Hybrid text + image search.
+     *
+     * <p>Forwards the request to the inference {@code /search/hybrid} endpoint which runs
+     * CLIP image recall and BGE-small text recall in parallel, then merges via min-max
+     * normalized weighted score fusion.
+     *
+     * <p>Fallback chain:
+     * <ol>
+     *   <li>Inference hybrid call fails → popularity fallback (degraded=true)
+     * </ol>
+     * Partial failures (one recall branch fails) are handled inside the inference service
+     * and reported via {@code degraded=true} / {@code degraded_reason} in a 200 response.
+     */
+    public CompletableFuture<HybridSearchResponse> hybridSearchAsync(HybridSearchRequest request) {
+        int k = request.getK() != null ? request.getK() : 10;
+
+        return callHybridSearchReactive(request, k)
+                .transform(CircuitBreakerOperator.of(circuitBreaker))
+                .timeout(REQUEST_TIMEOUT)
+                .subscribeOn(inferenceScheduler)
+                .onErrorResume(throwable -> {
+                    DegradationReason reason = mapInferenceDegradationReason(throwable);
+                    log.warn("Hybrid search failed [routing to popular items]: k={}, reason={}",
+                            k, reason.name());
+                    metrics.incrementDegradedTotal();
+                    recordDegradedReason(reason);
+                    return getPopularItemsFallbackMono(k, reason)
+                            .map(items -> {
+                                List<HybridItemDTO> hybridItems = items.stream()
+                                        .map(dto -> HybridItemDTO.builder()
+                                                .itemId(dto.getItemId())
+                                                .name(dto.getName())
+                                                .category(dto.getCategory())
+                                                .description(dto.getDescription())
+                                                .price(dto.getPrice())
+                                                .imgUrl(dto.getImgUrl())
+                                                .source("popularity_fallback")
+                                                .degraded(true)
+                                                .degradedReason(reason.name())
+                                                .reason(dto.getReason())
+                                                .reasonSource(dto.getReasonSource())
+                                                .finalScore(null)
+                                                .imageScore(null)
+                                                .textScore(null)
+                                                .behaviorScore(0.0)
+                                                .candidateSources(List.of())
+                                                .build())
+                                        .collect(Collectors.toList());
+                                return HybridSearchResponse.builder()
+                                        .items(hybridItems)
+                                        .k(k)
+                                        .mode("hybrid")
+                                        .status("success")
+                                        .degraded(true)
+                                        .degradedReason(reason.name())
+                                        .build();
+                            });
+                })
+                .contextCapture()
+                .toFuture();
+    }
+
+    /**
+     * Core hybrid search call — pure reactive, no blocking.
+     */
+    private Mono<HybridSearchResponse> callHybridSearchReactive(HybridSearchRequest request, int k) {
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("query", request.getQuery());
+        body.put("image_base64", request.getImageBase64());
+        body.put("k", k);
+        body.put("image_weight", request.getImageWeight() != null ? request.getImageWeight() : 0.5);
+        body.put("text_weight", request.getTextWeight() != null ? request.getTextWeight() : 0.4);
+        body.put("behavior_weight", request.getBehaviorWeight() != null ? request.getBehaviorWeight() : 0.1);
+        body.put("debug", Boolean.TRUE.equals(request.getDebug()));
+        if (request.getUserId() != null && !request.getUserId().isBlank()) {
+            body.put("user_id", request.getUserId());
+        }
+
+        return webClient.post()
+                .uri("/search/hybrid")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(new org.springframework.core.ParameterizedTypeReference<Map<String, Object>>() {})
+                .flatMap(respBody -> {
+                    if (respBody == null) {
+                        return Mono.error(new RuntimeException("Inference hybrid search returned empty response"));
+                    }
+
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> rawItems = (List<Map<String, Object>>) respBody.get("items");
+                    List<HybridItemDTO> items = rawItems != null
+                            ? HYBRID_ITEM_MAPPER.convertValue(rawItems, new TypeReference<List<HybridItemDTO>>() {})
+                            : List.of();
+
+                    HybridSearchResponse response = HybridSearchResponse.builder()
+                            .items(items)
+                            .k((Integer) respBody.getOrDefault("k", k))
+                            .mode((String) respBody.getOrDefault("mode", "hybrid"))
+                            .architecture((String) respBody.get("architecture"))
+                            .status("success")
+                            .degraded(Boolean.TRUE.equals(respBody.get("degraded")))
+                            .degradedReason((String) respBody.get("degraded_reason"))
+                            .requestId((String) respBody.get("request_id"))
+                            .latencyMs(resolveImageLatencyMs(respBody))
+                            .build();
+
+                    log.debug("Hybrid search successful: results={}, degraded={}", items.size(), response.getDegraded());
+                    return Mono.just(response);
+                })
+                .doOnError(e -> log.error("Hybrid search call failed: {}", e.getMessage()));
     }
 }

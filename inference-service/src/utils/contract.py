@@ -71,7 +71,7 @@ def contract_normalize(results: list, limit: int):
             if v is None or (isinstance(v, str) and v.strip() == ""):
                 missing_by_field[k] += 1
 
-        r["article_id"] = int(aid) if aid.isdigit() else aid
+        r["article_id"] = aid.zfill(10) if aid else aid
         r["meta"] = meta
         out.append(r)
 

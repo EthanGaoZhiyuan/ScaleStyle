@@ -16,11 +16,12 @@ public final class EventSource {
             "search",
             "browse",
             "recommendation",
-            "image_search"
+            "image_search",
+            "hybrid_search"
     );
 
     /** Regex derived from {@link #ALLOWED}, used in Bean Validation {@code @Pattern}. */
-    public static final String ALLOWED_PATTERN = "search|browse|recommendation|image_search";
+    public static final String ALLOWED_PATTERN = "search|browse|recommendation|image_search|hybrid_search";
 
     private EventSource() {}
 }

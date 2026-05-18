@@ -109,13 +109,22 @@ spec:
           mountPath: /cache/huggingface
         - name: prometheus-multiproc
           mountPath: /tmp/prometheus_multiproc
-      
+        # Ray workers and PyTorch use /dev/shm for shared-memory IPC. Without an
+        # explicit emptyDir mount the container gets the default 64 MiB tmpfs, which
+        # is too small for tensor transfers between Ray actors and causes OOM or SIGBUS.
+        - name: dshm
+          mountPath: /dev/shm
+
       volumes:
       - name: hf-cache
         persistentVolumeClaim:
           claimName: inference-model-cache
       - name: prometheus-multiproc
         emptyDir: {}
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 2Gi
 
 ---
 # Inference Service: ClusterIP for internal access

@@ -52,12 +52,8 @@ except Exception:
     kafka_stub.OffsetAndMetadata = _OffsetAndMetadata
     sys.modules["kafka"] = kafka_stub
 
-from consumer import (
-    EventConsumer,
-    ProcessingResult,
-    RetryPublishedCommitFailedError,
-    DlqPublishedCommitFailedError,
-)
+from consumer import EventConsumer, ProcessingResult
+from retry_router import DlqPublishedCommitFailedError, RetryPublishedCommitFailedError
 
 
 @pytest.fixture
@@ -595,7 +591,7 @@ def test_missing_consumer_mode_raises_error():
 
 @patch.dict("os.environ", {"CONSUMER_MODE": "primary"}, clear=False)
 def test_primary_mode_uses_isolated_consumer_group():
-    """Primary mode should use event-consumer-primary group"""
+    """Primary mode should use scalestyle-click-main group (distinct from retry)"""
     import importlib
     import config
 
@@ -615,14 +611,14 @@ def test_primary_mode_uses_isolated_consumer_group():
 
         EventConsumer()
 
-        # Verify consumer group ID has -primary suffix
+        # Verify primary consumer uses a group ID distinct from the retry consumer
         call_kwargs = mock_kafka_cls.call_args[1]
-        assert call_kwargs["group_id"] == "event-consumer-primary"
+        assert call_kwargs["group_id"] == "scalestyle-click-main"
 
 
 @patch.dict("os.environ", {"CONSUMER_MODE": "retry"}, clear=False)
 def test_retry_mode_uses_isolated_consumer_group():
-    """Retry mode should use event-consumer-retry group"""
+    """Retry mode should use scalestyle-click-retry group (distinct from primary)"""
     import importlib
     import config
 
@@ -642,9 +638,9 @@ def test_retry_mode_uses_isolated_consumer_group():
 
         EventConsumer()
 
-        # Verify consumer group ID has -retry suffix
+        # Verify retry consumer uses a group ID distinct from the primary consumer
         call_kwargs = mock_kafka_cls.call_args[1]
-        assert call_kwargs["group_id"] == "event-consumer-retry"
+        assert call_kwargs["group_id"] == "scalestyle-click-retry"
 
 
 def test_internal_producer_publish_budget_is_bounded_to_future_get_timeout():

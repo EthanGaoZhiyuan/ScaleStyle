@@ -13,6 +13,8 @@ from src.utils.redis_client import RedisClient
 from src.utils.redis_metadata import canonical_article_id, item_key
 from src.utils.metrics import counter, histogram
 
+_POPULARITY_KEY = RedisConfig.POPULARITY_KEY  # global:popular — seeded during bootstrap
+
 logger = logging.getLogger(__name__)
 
 
@@ -245,6 +247,37 @@ class PopularityDeployment:
                     e,
                 )
                 return []
+
+        if not ids_with_scores and _POPULARITY_KEY:
+            # Cold-start: no click-event windows have data yet.
+            # Fall back to the bootstrapped global:popular ZSET seeded at startup.
+            try:
+                t_op_start = time.perf_counter()
+                ids_with_scores = await asyncio.to_thread(
+                    self.redis.zrevrange,
+                    _POPULARITY_KEY,
+                    0,
+                    max(0, k - 1),
+                    withscores=True,
+                )
+                self.metrics["redis_ops_total"].labels(
+                    operation="zrevrange_coldstart", status="success"
+                ).inc()
+                self.metrics["redis_op_duration_seconds"].labels(
+                    operation="zrevrange_coldstart"
+                ).observe(time.perf_counter() - t_op_start)
+                if ids_with_scores:
+                    logger.info(
+                        "popularity_cold_start_fallback key=%s count=%d",
+                        _POPULARITY_KEY,
+                        len(ids_with_scores),
+                    )
+            except Exception as e:
+                logger.warning(
+                    "popularity_cold_start_fallback failed key=%s err=%s",
+                    _POPULARITY_KEY,
+                    e,
+                )
 
         ids = [canonical_article_id(item_id) for item_id, _ in ids_with_scores]
 

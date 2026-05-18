@@ -62,7 +62,10 @@ minio:
     size: 20Gi
     storageClass: scalestyle-ebs
   
-  # Default credentials (change for production!)
+  # ⚠️ Default credentials — MUST be overridden before production deployment.
+  # Store actual values in a Kubernetes Secret and reference them via
+  # minio.existingSecret (supported by the Milvus Helm chart) rather than
+  # embedding plaintext credentials here.
   rootUser: minioadmin
   rootPassword: minioadmin
 

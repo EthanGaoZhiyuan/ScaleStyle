@@ -1,5 +1,7 @@
 package com.scalestyle.gateway.controller;
 
+import com.scalestyle.gateway.dto.HybridSearchRequest;
+import com.scalestyle.gateway.dto.HybridSearchResponse;
 import com.scalestyle.gateway.dto.ImageSearchRequest;
 import com.scalestyle.gateway.dto.ImageSearchResponse;
 import com.scalestyle.gateway.dto.RecommendationDTO;
@@ -143,6 +145,49 @@ public class RecommendationController {
         future.whenComplete((result, throwable) -> {
             if (throwable != null) {
                 log.error("Async image search failed", throwable);
+                deferredResult.setErrorResult(throwable);
+            } else {
+                deferredResult.setResult(ResponseEntity.ok(CommonApiResponse.success(result)));
+            }
+        });
+
+        return deferredResult;
+    }
+
+    /**
+     * Hybrid text + image search.
+     *
+     * <p>Runs CLIP image recall and BGE-small text recall in parallel inside the
+     * inference service, merges via min-max normalized weighted score fusion, and
+     * returns results with per-source scores ({@code finalScore}, {@code imageScore},
+     * {@code textScore}, {@code behaviorScore}).
+     *
+     * <p>Applies the same timeout / cancellation contract as {@link #imageSearch}.
+     */
+    @PostMapping({"/api/recommendation/search/hybrid", "/search/hybrid"})
+    public DeferredResult<ResponseEntity<CommonApiResponse<HybridSearchResponse>>> hybridSearch(
+            @Valid @RequestBody HybridSearchRequest request) {
+
+        DeferredResult<ResponseEntity<CommonApiResponse<HybridSearchResponse>>> deferredResult =
+                new DeferredResult<>(DEFERRED_TIMEOUT_MS);
+
+        CompletableFuture<HybridSearchResponse> future =
+                recommendationService.hybridSearchAsync(request);
+
+        deferredResult.onTimeout(() -> {
+            future.cancel(true);
+            deferredResult.setErrorResult(new InferenceServiceException("Hybrid search request timed out"));
+        });
+
+        deferredResult.onCompletion(() -> {
+            if (!future.isDone()) {
+                future.cancel(true);
+            }
+        });
+
+        future.whenComplete((result, throwable) -> {
+            if (throwable != null) {
+                log.error("Async hybrid search failed", throwable);
                 deferredResult.setErrorResult(throwable);
             } else {
                 deferredResult.setResult(ResponseEntity.ok(CommonApiResponse.success(result)));

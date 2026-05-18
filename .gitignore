@@ -4,6 +4,7 @@
 .DS_Store
 .idea/
 .vscode/
+.ai/
 *.swp
 *.swo
 
@@ -106,13 +107,15 @@ yarn-error.log*
 # =========================
 # Only ignore data files in data-pipeline directory
 # Don't ignore important config files like Grafana dashboards
-data-pipeline/data/**/*.csv
-data-pipeline/data/**/*.parquet
-data-pipeline/data/**/*.json
-data-pipeline/data/**/*.pkl
-data-pipeline/data/**/*.pt
-data-pipeline/data/**/*.bin
-data-pipeline/data/**/*.safetensors
+data-pipeline/data/processed/*
+data-pipeline/data/raw/*
+# Nested data directory produced when bootstrap_data.py is run from data-pipeline/
+# as the working directory instead of the repo root.
+data-pipeline/data-pipeline/
+
+# Jupyter notebooks (contain embedded model outputs and large binary cells)
+generate_embeddings.ipynb
+inference-service/notebooks/
 
 # Phase 3: Vision test data
 data/vision_test/
@@ -151,4 +154,17 @@ docs/*
 !docs/assets/
 !docs/assets/architecture/
 !docs/assets/architecture/*.png
+# Allow git to descend into docs/performance/, then ignore everything except
+# the two curated authored reports (not generated dumps or raw data).
+!docs/performance/
+docs/performance/*
+!docs/performance/local-performance-current.md
+!docs/performance/local-e2e-validation.md
+!docs/performance/final-technical-metrics.md
+!docs/performance/local-feedback-loop-validation.md
+!docs/api/
+!docs/api/*.md
+!docs/runbooks/
+!docs/runbooks/*.md
+!docs/DEGRADATION_REASONS.md
 WEEK2_CLOSING_PASS_REPORT.md

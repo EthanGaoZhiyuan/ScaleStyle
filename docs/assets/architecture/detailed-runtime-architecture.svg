@@ -1,0 +1,328 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 900" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="ScaleStyle runtime request and feedback loop">
+  <!-- Background -->
+  <rect width="1400" height="900" fill="#ffffff"/>
+
+  <defs>
+    <marker id="rb-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1d4ed8"/>
+    </marker>
+    <marker id="rb-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b91c1c"/>
+    </marker>
+    <marker id="rb-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#d97706"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="40" y="44" font-size="22" font-weight="700" fill="#0f172a">ScaleStyle — Runtime Request &amp; Feedback Loop</text>
+  <text x="40" y="68" font-size="13" fill="#64748b">One recommendation request, the fallback path when inference is degraded, and the click feedback loop that primes the next request</text>
+
+  <!-- =========================================================
+       Swimlane backgrounds and labels
+       ========================================================= -->
+  <!-- Lane 1: Request path -->
+  <rect x="20" y="105" width="1360" height="175" rx="12" fill="#f8fafc" stroke="#e2e8f0"/>
+  <rect x="20" y="105" width="140" height="175" rx="12" fill="#eff6ff" stroke="#e2e8f0"/>
+  <text x="90" y="180" text-anchor="middle" font-size="14" font-weight="700" fill="#1e3a8a">Request</text>
+  <text x="90" y="200" text-anchor="middle" font-size="11" fill="#64748b">path</text>
+
+  <!-- Lane 2: Inference path -->
+  <rect x="20" y="290" width="1360" height="245" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <rect x="20" y="290" width="140" height="245" rx="12" fill="#eff6ff" stroke="#e2e8f0"/>
+  <text x="90" y="400" text-anchor="middle" font-size="14" font-weight="700" fill="#1e3a8a">Inference</text>
+  <text x="90" y="420" text-anchor="middle" font-size="11" fill="#64748b">embed · retrieve</text>
+  <text x="90" y="436" text-anchor="middle" font-size="11" fill="#64748b">rerank · boost</text>
+
+  <!-- Lane 3: Fallback path -->
+  <rect x="20" y="545" width="1360" height="155" rx="12" fill="#fef2f2" stroke="#fecaca"/>
+  <rect x="20" y="545" width="140" height="155" rx="12" fill="#fee2e2" stroke="#fecaca"/>
+  <text x="90" y="615" text-anchor="middle" font-size="14" font-weight="700" fill="#b91c1c">Fallback</text>
+  <text x="90" y="635" text-anchor="middle" font-size="11" fill="#9f1239">degraded path</text>
+
+  <!-- Lane 4: Event feedback loop -->
+  <rect x="20" y="710" width="1360" height="170" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+  <rect x="20" y="710" width="140" height="170" rx="12" fill="#fff7ed" stroke="#fed7aa"/>
+  <text x="90" y="785" text-anchor="middle" font-size="14" font-weight="700" fill="#9a3412">Feedback</text>
+  <text x="90" y="805" text-anchor="middle" font-size="11" fill="#64748b">click loop</text>
+
+  <!-- =========================================================
+       LANE 1: Request path
+       ========================================================= -->
+  <!-- Client -->
+  <g>
+    <rect x="180" y="155" width="130" height="78" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+    <rect x="180" y="155" width="130" height="3" rx="1.5" fill="#1d4ed8"/>
+    <text x="245" y="186" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Client</text>
+    <text x="245" y="206" text-anchor="middle" font-size="11" fill="#64748b">GET /api/recommendation</text>
+    <text x="245" y="222" text-anchor="middle" font-size="11" fill="#64748b">/search?query&amp;userId</text>
+  </g>
+
+  <!-- Gateway Controller -->
+  <g>
+    <rect x="335" y="155" width="170" height="78" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+    <rect x="335" y="155" width="170" height="3" rx="1.5" fill="#1d4ed8"/>
+    <text x="420" y="186" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Gateway Controller</text>
+    <text x="420" y="206" text-anchor="middle" font-size="11" fill="#64748b">RecommendationController</text>
+    <text x="420" y="222" text-anchor="middle" font-size="11" fill="#64748b">validate · cache lookup</text>
+  </g>
+
+  <!-- Resilience4j CB -->
+  <g>
+    <rect x="530" y="155" width="170" height="78" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+    <rect x="530" y="155" width="170" height="3" rx="1.5" fill="#1d4ed8"/>
+    <text x="615" y="186" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Resilience4j</text>
+    <text x="615" y="206" text-anchor="middle" font-size="11" fill="#64748b">circuit breaker</text>
+    <text x="615" y="222" text-anchor="middle" font-size="11" fill="#64748b">50% / 50-call window</text>
+  </g>
+
+  <!-- WebClient -->
+  <g>
+    <rect x="725" y="155" width="170" height="78" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+    <rect x="725" y="155" width="170" height="3" rx="1.5" fill="#1d4ed8"/>
+    <text x="810" y="186" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">WebClient</text>
+    <text x="810" y="206" text-anchor="middle" font-size="11" fill="#64748b">Reactor · HTTP/REST</text>
+    <text x="810" y="222" text-anchor="middle" font-size="11" fill="#64748b">no-queue pool</text>
+  </g>
+
+  <!-- Inference Ingress -->
+  <g>
+    <rect x="920" y="155" width="190" height="78" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+    <rect x="920" y="155" width="190" height="3" rx="1.5" fill="#1d4ed8"/>
+    <text x="1015" y="186" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Inference Ingress</text>
+    <text x="1015" y="206" text-anchor="middle" font-size="11" fill="#64748b">FastAPI · Ray Serve</text>
+    <text x="1015" y="222" text-anchor="middle" font-size="11" fill="#64748b">orchestrates pipeline</text>
+  </g>
+
+  <!-- Lane 1 arrows (left-to-right, all straight) -->
+  <line x1="310" y1="194" x2="333" y2="194" stroke="#1d4ed8" stroke-width="2.2" marker-end="url(#rb-blue)"/>
+  <line x1="505" y1="194" x2="528" y2="194" stroke="#1d4ed8" stroke-width="2.2" marker-end="url(#rb-blue)"/>
+  <line x1="700" y1="194" x2="723" y2="194" stroke="#1d4ed8" stroke-width="2.2" marker-end="url(#rb-blue)"/>
+  <line x1="895" y1="194" x2="918" y2="194" stroke="#1d4ed8" stroke-width="2.2" marker-end="url(#rb-blue)"/>
+
+  <!-- L1 → L2 handoff: Ingress down to Embedding (clean curve in right gutter) -->
+  <path d="M 1015 233 L 1015 260 L 270 260 L 270 332" fill="none" stroke="#1d4ed8" stroke-width="2.2" marker-end="url(#rb-blue)"/>
+
+  <!-- =========================================================
+       LANE 2: Inference path
+       ========================================================= -->
+  <!-- Embedding -->
+  <g>
+    <rect x="180" y="332" width="180" height="78" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+    <rect x="180" y="332" width="180" height="3" rx="1.5" fill="#1d4ed8"/>
+    <text x="270" y="362" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Embedding</text>
+    <text x="270" y="382" text-anchor="middle" font-size="11" fill="#64748b">BGE-small-en-v1.5</text>
+    <text x="270" y="398" text-anchor="middle" font-size="11" fill="#64748b">384-dim</text>
+  </g>
+
+  <!-- Milvus text search -->
+  <g>
+    <rect x="380" y="332" width="170" height="78" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+    <rect x="380" y="332" width="170" height="3" rx="1.5" fill="#1d4ed8"/>
+    <text x="465" y="362" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Milvus text search</text>
+    <text x="465" y="382" text-anchor="middle" font-size="11" fill="#64748b">ANN · top-N candidates</text>
+    <text x="465" y="398" text-anchor="middle" font-size="11" fill="#64748b">inner product</text>
+  </g>
+
+  <!-- Reranker -->
+  <g>
+    <rect x="570" y="332" width="170" height="78" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+    <rect x="570" y="332" width="170" height="3" rx="1.5" fill="#1d4ed8"/>
+    <text x="655" y="362" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Reranker</text>
+    <text x="655" y="382" text-anchor="middle" font-size="11" fill="#64748b">bge-reranker-base</text>
+    <text x="655" y="398" text-anchor="middle" font-size="11" fill="#64748b">cross-encoder</text>
+  </g>
+
+  <!-- Personalization + BehaviorBoost -->
+  <g>
+    <rect x="760" y="332" width="210" height="78" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+    <rect x="760" y="332" width="210" height="3" rx="1.5" fill="#1d4ed8"/>
+    <text x="865" y="362" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Personalization + BehaviorBoost</text>
+    <text x="865" y="382" text-anchor="middle" font-size="11" fill="#64748b">PersonalizationSnapshot · 1× Redis</text>
+    <text x="865" y="398" text-anchor="middle" font-size="11" fill="#64748b">click 1.5× · affinity 1.2× · cap 3×</text>
+  </g>
+
+  <!-- Healthy HTTP 200 -->
+  <g>
+    <rect x="990" y="332" width="150" height="78" rx="9" fill="#ffffff" stroke="#bbf7d0"/>
+    <rect x="990" y="332" width="150" height="3" rx="1.5" fill="#16a34a"/>
+    <text x="1065" y="362" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">HTTP 200</text>
+    <text x="1065" y="382" text-anchor="middle" font-size="11" fill="#64748b">ranked items</text>
+    <text x="1065" y="398" text-anchor="middle" font-size="11" fill="#64748b">+ behaviorScore</text>
+  </g>
+
+  <!-- Inline note near BehaviorBoost: simplified feedback indicator -->
+  <g>
+    <rect x="760" y="416" width="210" height="22" rx="11" fill="#eff6ff" stroke="#bfdbfe"/>
+    <text x="865" y="431" text-anchor="middle" font-size="10.5" fill="#1d4ed8">↻ reads updated Redis features each request</text>
+  </g>
+
+  <!-- Inference main row arrows -->
+  <line x1="360" y1="371" x2="378" y2="371" stroke="#1d4ed8" stroke-width="2.2" marker-end="url(#rb-blue)"/>
+  <line x1="550" y1="371" x2="568" y2="371" stroke="#1d4ed8" stroke-width="2.2" marker-end="url(#rb-blue)"/>
+  <line x1="740" y1="371" x2="758" y2="371" stroke="#1d4ed8" stroke-width="2.2" marker-end="url(#rb-blue)"/>
+  <line x1="970" y1="371" x2="988" y2="371" stroke="#1d4ed8" stroke-width="2.2" marker-end="url(#rb-blue)"/>
+
+  <!-- Optional image / hybrid branch (sub-row) -->
+  <g>
+    <rect x="180" y="455" width="180" height="68" rx="9" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 3"/>
+    <text x="270" y="480" text-anchor="middle" font-size="12" font-weight="600" fill="#0f172a">VisionDeployment</text>
+    <text x="270" y="498" text-anchor="middle" font-size="11" fill="#64748b">CLIP ViT-B/32 · 512-dim</text>
+    <text x="270" y="514" text-anchor="middle" font-size="10" fill="#94a3b8">opt-in · VISION_ENABLED=1</text>
+  </g>
+  <g>
+    <rect x="380" y="455" width="170" height="68" rx="9" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="3 3"/>
+    <text x="465" y="480" text-anchor="middle" font-size="12" font-weight="600" fill="#0f172a">Milvus image search</text>
+    <text x="465" y="498" text-anchor="middle" font-size="11" fill="#64748b">ANN · image candidates</text>
+    <text x="465" y="514" text-anchor="middle" font-size="10" fill="#94a3b8">hybrid → score fusion</text>
+  </g>
+  <!-- Branch arrows -->
+  <path d="M 270 410 L 270 453" stroke="#1d4ed8" stroke-width="1.8" stroke-dasharray="4 3" marker-end="url(#rb-blue)" fill="none"/>
+  <line x1="360" y1="489" x2="378" y2="489" stroke="#1d4ed8" stroke-width="1.8" stroke-dasharray="4 3" marker-end="url(#rb-blue)"/>
+  <!-- merge into BehaviorBoost (short clean L-shape, doesn't cross Reranker) -->
+  <path d="M 550 489 L 715 489 L 715 412" fill="none" stroke="#1d4ed8" stroke-width="1.8" stroke-dasharray="4 3" marker-end="url(#rb-blue)"/>
+  <text x="635" y="483" font-size="10" fill="#1d4ed8" font-style="italic">score fusion → boost</text>
+
+  <!-- Timeout callout -->
+  <g>
+    <rect x="1170" y="332" width="210" height="180" rx="10" fill="#fffbeb" stroke="#fde68a"/>
+    <text x="1275" y="356" text-anchor="middle" font-size="12" font-weight="700" fill="#92400e">Timeout budget</text>
+    <line x1="1186" y1="368" x2="1364" y2="368" stroke="#fde68a"/>
+    <g font-size="11" fill="#78350f">
+      <text x="1190" y="388">embedding</text><text x="1370" y="388" text-anchor="end" font-weight="600">200 ms</text>
+      <text x="1190" y="408">retrieval</text><text x="1370" y="408" text-anchor="end" font-weight="600">150 ms</text>
+      <text x="1190" y="428">reranker</text><text x="1370" y="428" text-anchor="end" font-weight="600">120 ms</text>
+      <text x="1190" y="448">personalization</text><text x="1370" y="448" text-anchor="end" font-weight="600">50 ms</text>
+      <line x1="1186" y1="458" x2="1364" y2="458" stroke="#fde68a"/>
+      <text x="1190" y="478">Gateway Reactor</text><text x="1370" y="478" text-anchor="end" font-weight="600">600 ms</text>
+      <text x="1190" y="498">Netty read</text><text x="1370" y="498" text-anchor="end" font-weight="600">700 ms</text>
+    </g>
+  </g>
+
+  <!-- =========================================================
+       LANE 3: Fallback path — flat horizontal chain
+       ========================================================= -->
+  <!-- Trigger -->
+  <g>
+    <rect x="180" y="582" width="210" height="76" rx="9" fill="#ffffff" stroke="#fecaca"/>
+    <rect x="180" y="582" width="210" height="3" rx="1.5" fill="#b91c1c"/>
+    <text x="285" y="610" text-anchor="middle" font-size="13" font-weight="600" fill="#b91c1c">Circuit open / timeout</text>
+    <text x="285" y="630" text-anchor="middle" font-size="11" fill="#9f1239">CB trips at 50% failure</text>
+    <text x="285" y="646" text-anchor="middle" font-size="11" fill="#9f1239">or 600 ms breach</text>
+  </g>
+
+  <!-- materialized:24h -->
+  <g>
+    <rect x="410" y="582" width="160" height="76" rx="9" fill="#ffffff" stroke="#fecaca"/>
+    <rect x="410" y="582" width="160" height="3" rx="1.5" fill="#b91c1c"/>
+    <text x="490" y="610" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">materialized:24h</text>
+    <text x="490" y="630" text-anchor="middle" font-size="11" fill="#64748b">primary fallback</text>
+    <text x="490" y="646" text-anchor="middle" font-size="11" fill="#64748b">ZSET window</text>
+  </g>
+
+  <!-- materialized:7d -->
+  <g>
+    <rect x="590" y="582" width="160" height="76" rx="9" fill="#ffffff" stroke="#fecaca"/>
+    <rect x="590" y="582" width="160" height="3" rx="1.5" fill="#b91c1c"/>
+    <text x="670" y="610" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">materialized:7d</text>
+    <text x="670" y="630" text-anchor="middle" font-size="11" fill="#64748b">if 24h empty</text>
+    <text x="670" y="646" text-anchor="middle" font-size="11" fill="#64748b">ZSET window</text>
+  </g>
+
+  <!-- global:popular -->
+  <g>
+    <rect x="770" y="582" width="180" height="76" rx="9" fill="#ffffff" stroke="#fecaca"/>
+    <rect x="770" y="582" width="180" height="3" rx="1.5" fill="#b91c1c"/>
+    <text x="860" y="610" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">global:popular</text>
+    <text x="860" y="630" text-anchor="middle" font-size="11" fill="#64748b">last-resort ZSET</text>
+    <text x="860" y="646" text-anchor="middle" font-size="11" fill="#64748b">1,147 entries</text>
+  </g>
+
+  <!-- Degraded HTTP 200 (lives inside Fallback lane) -->
+  <g>
+    <rect x="970" y="582" width="240" height="76" rx="9" fill="#ffffff" stroke="#fed7aa"/>
+    <rect x="970" y="582" width="240" height="3" rx="1.5" fill="#d97706"/>
+    <text x="1090" y="610" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">HTTP 200 · degraded=true</text>
+    <text x="1090" y="630" text-anchor="middle" font-size="11" fill="#64748b">degradation_reason set</text>
+    <text x="1090" y="646" text-anchor="middle" font-size="11" fill="#64748b">enriched with item metadata</text>
+  </g>
+
+  <!-- Fallback horizontal chain arrows -->
+  <line x1="390" y1="620" x2="408" y2="620" stroke="#b91c1c" stroke-width="2.2" marker-end="url(#rb-red)"/>
+  <line x1="570" y1="620" x2="588" y2="620" stroke="#b91c1c" stroke-width="2.2" marker-end="url(#rb-red)"/>
+  <line x1="750" y1="620" x2="768" y2="620" stroke="#b91c1c" stroke-width="2.2" marker-end="url(#rb-red)"/>
+  <line x1="950" y1="620" x2="968" y2="620" stroke="#b91c1c" stroke-width="2.2" marker-end="url(#rb-red)"/>
+
+  <!-- Trigger entry: routed via L1-bottom gap → left gutter → short vertical into Trigger top.
+       Avoids crossing Request and Inference cards. -->
+  <path d="M 615 233 L 615 268 L 168 268 L 168 555 L 285 555 L 285 580" fill="none" stroke="#b91c1c" stroke-width="2" marker-end="url(#rb-red)"/>
+  <text x="178" y="548" font-size="10" fill="#b91c1c" font-weight="600">circuit open / timeout breach</text>
+
+  <!-- =========================================================
+       LANE 4: Event feedback loop
+       ========================================================= -->
+  <!-- POST + Controller -->
+  <g>
+    <rect x="180" y="748" width="200" height="78" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+    <rect x="180" y="748" width="200" height="3" rx="1.5" fill="#d97706"/>
+    <text x="280" y="776" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">POST /api/events/click</text>
+    <text x="280" y="796" text-anchor="middle" font-size="11" fill="#64748b">Gateway EventController</text>
+    <text x="280" y="812" text-anchor="middle" font-size="11" fill="#64748b">200 only on broker ACK</text>
+  </g>
+
+  <!-- Kafka -->
+  <g>
+    <rect x="405" y="748" width="160" height="78" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+    <rect x="405" y="748" width="160" height="3" rx="1.5" fill="#d97706"/>
+    <text x="485" y="776" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Kafka broker</text>
+    <text x="485" y="796" text-anchor="middle" font-size="11" fill="#64748b">click topic · idempotent</text>
+    <text x="485" y="812" text-anchor="middle" font-size="11" fill="#64748b">producer ACK = all</text>
+  </g>
+
+  <!-- Consumer group -->
+  <g>
+    <rect x="590" y="738" width="280" height="98" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+    <rect x="590" y="738" width="280" height="3" rx="1.5" fill="#d97706"/>
+    <text x="730" y="760" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Event consumer</text>
+    <g font-size="11" fill="#1e293b">
+      <rect x="604" y="770" width="80" height="30" rx="6" fill="#fff7ed" stroke="#fed7aa"/>
+      <text x="644" y="789" text-anchor="middle" font-weight="600">primary</text>
+
+      <rect x="690" y="770" width="80" height="30" rx="6" fill="#fff7ed" stroke="#fed7aa"/>
+      <text x="730" y="789" text-anchor="middle" font-weight="600">retry</text>
+
+      <rect x="776" y="770" width="80" height="30" rx="6" fill="#fff7ed" stroke="#fed7aa"/>
+      <text x="816" y="789" text-anchor="middle" font-weight="600">DLQ</text>
+    </g>
+    <text x="730" y="822" text-anchor="middle" font-size="10" fill="#94a3b8">retry.1s → retry.10s → retry.60s</text>
+  </g>
+
+  <!-- Redis Lua writes -->
+  <g>
+    <rect x="895" y="748" width="200" height="78" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+    <rect x="895" y="748" width="200" height="3" rx="1.5" fill="#d97706"/>
+    <text x="995" y="776" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Redis Lua writes</text>
+    <text x="995" y="796" text-anchor="middle" font-size="11" fill="#64748b">atomic multi-key update</text>
+    <text x="995" y="812" text-anchor="middle" font-size="11" fill="#64748b">~3 s click → feature</text>
+  </g>
+
+  <!-- Next request reads features -->
+  <g>
+    <rect x="1120" y="748" width="240" height="78" rx="9" fill="#ffffff" stroke="#cbd5e1"/>
+    <rect x="1120" y="748" width="240" height="3" rx="1.5" fill="#1d4ed8"/>
+    <text x="1240" y="776" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Next request reads features</text>
+    <text x="1240" y="796" text-anchor="middle" font-size="11" fill="#64748b">recent_clicks · category_affinity</text>
+    <text x="1240" y="812" text-anchor="middle" font-size="11" fill="#64748b">popularity:materialized:*</text>
+  </g>
+
+  <!-- Lane 4 horizontal arrows -->
+  <line x1="380" y1="787" x2="403" y2="787" stroke="#d97706" stroke-width="2.2" marker-end="url(#rb-orange)"/>
+  <line x1="565" y1="787" x2="588" y2="787" stroke="#d97706" stroke-width="2.2" marker-end="url(#rb-orange)"/>
+  <line x1="870" y1="787" x2="893" y2="787" stroke="#d97706" stroke-width="2.2" marker-end="url(#rb-orange)"/>
+  <line x1="1095" y1="787" x2="1118" y2="787" stroke="#d97706" stroke-width="2.2" marker-end="url(#rb-orange)"/>
+
+  <!-- (Loop-back curve removed; the small badge under BehaviorBoost summarizes it.) -->
+
+  <!-- Footer -->
+  <text x="40" y="892" font-size="10" fill="#94a3b8">Per-stage budgets enforced inside inference; gateway 600 ms Reactor timeout fires before the 700 ms Netty hard kill. WebClient pool rejects overflow immediately.</text>
+</svg>
